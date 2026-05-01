@@ -72,7 +72,7 @@ class ResistanceReason(str, Enum):
     AVOIDANT = "avoidant"
     EXTERNAL = "external"
 
-class MaihераResponse(str, Enum):
+class MAIHERAResponse(str, Enum):
     PUSH = "push"
     REFRAME = "reframe"
     ASSIST = "assist"
@@ -88,6 +88,11 @@ class FocusStyle(str, Enum):
     DEEP_WORK = "deep-work"
     CONTEXT_SWITCHER = "context-switcher"
     DEADLINE_DRIVEN = "deadline-driven"
+
+class WorkspaceType(str, Enum):
+    PERSONAL = "personal"
+    OFFICE = "office"
+    SHARED = "shared"
 
 
 # ── Pydantic Models ────────────────────────────────────────────────────
@@ -108,6 +113,7 @@ class NodeSchema(BaseModel):
     last_surfaced: Optional[str] = None
     status: NodeStatus = NodeStatus.ACTIVE
     visibility: NodeVisibility = NodeVisibility.PRIVATE
+    workspace: WorkspaceType = WorkspaceType.PERSONAL
     embedding_ref: Optional[str] = None
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     attention: float = Field(default=0.3, ge=0.0, le=1.0)
@@ -138,7 +144,7 @@ class ResistanceEdge(BaseModel):
     )
     source: NodeSource = NodeSource.MANUAL
     evidence: list[str] = Field(default_factory=list)
-    maihera_response: MaihераResponse
+    maihera_response: MAIHERAResponse
     last_intervention: Optional[str] = None
     trend: ResistanceTrend = ResistanceTrend.STABLE
 
