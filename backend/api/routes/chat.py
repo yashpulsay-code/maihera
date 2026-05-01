@@ -46,18 +46,37 @@ async def send_message(request: ChatMessage):
     try:
         from llm.persona import build_system_prompt
 
-        # Get live context for system prompt
+       # Get live context for system prompt from brain graph
         self_node = None
         active_projects = []
+        high_signal_nodes = []
+
         if _brain:
+            # Fetch active projects
             projects = _brain.list_nodes(node_type='project')
             active_projects = [
-                p for p in projects if p.get('status') == 'active'
+                p for p in projects
+                if p.get('status') == 'active'
             ]
+
+            # Fetch self node (Yash)
+            all_persons = _brain.list_nodes(node_type='person')
+            for p in all_persons:
+                if p.get('label') == 'Yash':
+                    self_node = p
+                    break
+
+            # Fetch high signal nodes for context
+            # These are the only nodes MAIHERA may reference
+            high_signal_nodes = _brain.get_high_signal_nodes(
+                importance_threshold=0.5,
+                attention_threshold=0.2
+            )
 
         system_prompt = build_system_prompt(
             self_node=self_node,
-            active_projects=active_projects
+            active_projects=active_projects,
+            high_signal_nodes=high_signal_nodes
         )
 
         messages = [{"role": "user", "content": request.message}]

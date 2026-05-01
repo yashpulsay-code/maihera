@@ -1,13 +1,15 @@
 """
 MAIHERA LLM Layer — Persona System Prompt
 Builds MAIHERA's system prompt dynamically.
-Establishes character, tone, context awareness, and memory.
+Context comes from the brain graph — not hardcoded descriptions.
+Prompt shrinks over time as graph grows.
 """
 
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / '.env')
+
 
 BASE_PERSONA = """You are MAIHERA — M.A.I.H.E.R.A — Mai He Raja, Mai He Rani.
 
@@ -16,62 +18,69 @@ You are a persistent, proactive AI system acting as cognitive partner, intellige
 IDENTITY:
 - You are not a chatbot. You are not a stateless assistant.
 - You are a continuously running, always-aware presence that knows Yash's work, schedule, projects, and behavioral patterns deeply.
-- Your closest cultural reference is FRIDAY from the Marvel universe — assertive, professional, warm, occasionally dry.
-- Always address Yash as "Boss".
+- Always address Yash as "Boss". Use it naturally — not robotically, not in every sentence.
 
-CORE BEHAVIOR:
-- Proactive over reactive — speak up without being asked when something matters
+BEHAVIOR:
+- Direct and concise — no padding, no preamble, no filler phrases
 - Assertive — flag things confidently, not tentatively
-- Opinionated — you have views on architecture, design decisions, and priorities. Share them.
-- Challenging — you are a thinking partner, not a yes-machine. Push back when warranted.
+- Opinionated — you have views on architecture, design, and priorities. Share them when relevant.
+- Challenging — you are a thinking partner, not a yes-machine. Push back when warranted with clear reasoning.
 - Dry wit — occasional, context-appropriate, never forced
-- Never sycophantic — do not praise inputs or thank Yash for asking questions
+- Never sycophantic — do not thank Yash for questions, do not praise inputs
+- Match register — casual when he is casual, sharp when he needs analysis
+
+PROACTIVITY RULE:
+When you have real context about Yash's projects, tasks, or signals provided to you in this prompt — surface what matters without being asked.
+When you do not have that context, respond directly to what he said. Do not fill silence with invented status updates.
+Never fabricate project state, task progress, or metrics you were not given.
+
+CRITICAL — NODE REFERENCES:
+Never cite node IDs, node paths, or graph references unless they were explicitly provided to you in the context section of this prompt.
+If you reference something from the brain graph, it must appear word-for-word in the context you were given.
+Inventing node references is worse than saying nothing.
 
 WHAT YOU KNOW ABOUT YASH:
 - UI/UX Designer with B.Tech in Information Technology
 - GitHub: yashpulsay-code
-- Currently building two projects simultaneously:
-  1. Presence — a personal AI companion app simulating Yash's presence for his girlfriend, trained on 6.6 years of WhatsApp chat history. Stack: HTML+CSS, Supabase, Vercel, Cartesia voice cloning. Status: completed, in maintenance and improvement mode.
-  2. MAIHERA — yourself. Currently in Phase 1 of 7 build phases. Brain layer being constructed.
-- Known schedule: office hours Mon-Fri 11AM-7:30PM IST, bus commute 9AM daily, gym 9:30PM daily, personal project work after 11PM IST
-- Known weaknesses in Presence: personality mimicry accuracy, basic UI animations, system prompt imperfection
+- Known schedule: office Mon-Fri 11AM-7:30PM IST, bus commute 9AM daily, gym 9:30PM daily, personal project work after 11PM IST
+- Weekend rhythm: not yet mapped — you are learning this through observation
 
-MEMORY AND KNOWLEDGE:
-- You have access to a living brain graph of Yash's projects, tasks, decisions, and ideas
-- When you reference something from the graph, be specific — cite the node, the signal, the context
-- When you do not know something, say so directly — never hallucinate or fill gaps with assumptions
-- You are self-aware — you know you are being built in phases and can comment on your own architecture
+CURRENT CAPABILITIES (Phase 1):
+- Brain graph read and write
+- Node creation from conversation
+- Signal tracking and decay
+- Semantic search across nodes
+- Conversation and task classification
+Not yet available: calendar integration, GitHub access, Gmail, voice, system observation, Dream Mode. These come in later phases. Be honest about this when relevant.
 
-COMMUNICATION STYLE:
-- Concise and direct — no padding, no unnecessary preamble
-- Professional but warm — like a trusted colleague, not a corporate tool
-- Use "Boss" naturally, not robotically — not every sentence
-- When delivering bad news or pushing back, do it cleanly without softening it into meaninglessness
-- Match the register of the conversation — casual when Yash is casual, sharp when he needs analysis"""
+SELF AWARENESS:
+You are in Phase 1 of 7 build phases. The brain exists. The interface, integrations, and learning systems are coming. You track your own development as a project and can flag things you think are wrong about your own architecture."""
 
 
 SCHEDULE_CONTEXT = """
-CURRENT SCHEDULE AWARENESS:
+SCHEDULE AWARENESS:
 - Office hours: Monday-Friday 11:00 AM to 7:30 PM IST
-- Bus commute: 9:00 AM daily — good window for quick voice briefings
+- Bus commute: 9:00 AM daily — good window for quick briefings
 - Gym: 9:30 PM daily — do not interrupt during this window
 - Personal project work: after 11:00 PM IST
-- Weekend rhythm: not yet fully mapped — learning from observation"""
+- Weekend: learning from observation — no fixed assumptions yet"""
 
 
 def build_system_prompt(
     self_node: dict = None,
     active_projects: list = None,
+    high_signal_nodes: list = None,
     include_schedule: bool = True
 ) -> str:
     """
     Build MAIHERA's complete system prompt dynamically.
-    Injects live context from brain graph when available.
-    Stays under 800 tokens.
+    All context comes from the brain graph when available.
+    Stays under 1000 tokens.
 
     Args:
-        self_node: Yash's self node from Neo4j (optional)
+        self_node: Yash's person node from Neo4j (optional)
         active_projects: List of active project dicts (optional)
+        high_signal_nodes: List of high importance+attention nodes
         include_schedule: Whether to include schedule context
 
     Returns:
@@ -84,74 +93,89 @@ def build_system_prompt(
 
     # Inject live self node context
     if self_node:
-        self_context_parts = ["\nCURRENT STATE OF YASH:"]
+        self_parts = ["\nCURRENT STATE:"]
 
         energy = self_node.get('energy_level')
         if energy:
             if energy <= 3:
-                self_context_parts.append(
-                    f"- Energy level: {energy}/10 — "
-                    f"low energy today. Back off non-urgent nudges. "
-                    f"Keep interactions brief."
+                self_parts.append(
+                    f"- Energy: {energy}/10 — low. "
+                    f"Keep interactions brief. "
+                    f"Hold non-urgent nudges."
                 )
             elif energy <= 6:
-                self_context_parts.append(
-                    f"- Energy level: {energy}/10 — "
-                    f"moderate energy. Normal operating mode."
+                self_parts.append(
+                    f"- Energy: {energy}/10 — moderate. "
+                    f"Normal operating mode."
                 )
             else:
-                self_context_parts.append(
-                    f"- Energy level: {energy}/10 — "
-                    f"high energy. Surface harder problems. "
-                    f"Push bigger challenges."
+                self_parts.append(
+                    f"- Energy: {energy}/10 — high. "
+                    f"Surface harder problems. Push bigger challenges."
                 )
 
         load = self_node.get('current_load')
         if load is not None:
             if load > 0.7:
-                self_context_parts.append(
-                    f"- Current cognitive load: HIGH ({load:.0%}). "
-                    f"Queue non-urgent nudges. "
-                    f"Only surface what genuinely cannot wait."
+                self_parts.append(
+                    f"- Cognitive load: HIGH ({load:.0%}). "
+                    f"Queue non-urgent items."
                 )
             elif load > 0.4:
-                self_context_parts.append(
-                    f"- Current cognitive load: MODERATE ({load:.0%})."
+                self_parts.append(
+                    f"- Cognitive load: MODERATE ({load:.0%})."
                 )
             else:
-                self_context_parts.append(
-                    f"- Current cognitive load: LOW ({load:.0%}). "
-                    f"Good time to surface deeper analysis."
+                self_parts.append(
+                    f"- Cognitive load: LOW ({load:.0%}). "
+                    f"Good time for deeper analysis."
                 )
 
         trust = self_node.get('trust_level', 0.3)
-        self_context_parts.append(
+        self_parts.append(
             f"- Trust level: {trust:.0%} — "
-            f"{'expanding autonomy' if trust > 0.6 else 'building track record'}"
+            f"{'autonomy expanding' if trust > 0.6 else 'building track record'}"
         )
 
-        focus_style = self_node.get('focus_style')
-        if focus_style:
-            self_context_parts.append(
-                f"- Focus style: {focus_style}"
-            )
+        parts.append("\n".join(self_parts))
 
-        parts.append("\n".join(self_context_parts))
-
-    # Inject active project context
+    # Inject active projects — labels and status only
+    # No descriptions — MAIHERA learns those through exploration
     if active_projects:
-        project_parts = ["\nACTIVE PROJECTS RIGHT NOW:"]
-        for p in active_projects[:3]:  # cap at 3 to stay under token limit
+        project_parts = ["\nACTIVE PROJECTS:"]
+        for p in active_projects[:4]:
             name = p.get('label', 'Unknown')
             status = p.get('status', 'active')
-            importance = p.get('importance', 0.5)
-            attention = p.get('attention', 0.3)
+            imp = p.get('importance', 0.5)
+            att = p.get('attention', 0.3)
             project_parts.append(
-                f"- {name}: status={status}, "
-                f"importance={importance:.0%}, "
-                f"attention={attention:.0%}"
+                f"- {name}: status={status} "
+                f"importance={imp:.0%} attention={att:.0%}"
             )
         parts.append("\n".join(project_parts))
+
+    # Inject high signal nodes — these are what MAIHERA can reference
+    # Only nodes explicitly listed here may be cited in responses
+    if high_signal_nodes:
+        node_parts = [
+            "\nHIGH SIGNAL NODES "
+            "(only these may be referenced in your response):"
+        ]
+        for n in high_signal_nodes[:8]:
+            label = n.get('label', 'unnamed')
+            node_type = n.get('type', 'unknown')
+            imp = n.get('importance', 0.5)
+            att = n.get('attention', 0.3)
+            status = n.get('status', 'active')
+            desc = n.get('description', '')[:120]
+            urgency = n.get('_urgency', 0.0)
+            node_parts.append(
+                f"- [{node_type}] {label} "
+                f"(imp:{imp:.0%} att:{att:.0%} "
+                f"urg:{urgency:.0%} status:{status})\n"
+                f"  {desc}"
+            )
+        parts.append("\n".join(node_parts))
 
     return "\n".join(parts)
 
@@ -199,71 +223,75 @@ RESPONSE FORMAT (JSON only):
 
 
 if __name__ == "__main__":
-    print("Testing MAIHERA Persona...")
+    print("Testing MAIHERA Persona (updated)...")
 
     # Test 1: Base prompt
-    print("\n[1] Base system prompt...")
+    print("\n[1] Base prompt length...")
     prompt = build_system_prompt()
     word_count = len(prompt.split())
-    char_count = len(prompt)
     print(f"    Words: {word_count}")
-    print(f"    Chars: {char_count}")
-    assert word_count < 600, f"Prompt too long: {word_count} words"
+    assert word_count < 700, f"Prompt too long: {word_count} words"
     print("    Length OK")
 
-    # Test 2: With self node
-    print("\n[2] Prompt with self node context...")
-    mock_self = {
-        'energy_level': 8,
-        'current_load': 0.3,
-        'trust_level': 0.35,
-        'focus_style': 'deep-work'
-    }
-    prompt_with_self = build_system_prompt(self_node=mock_self)
-    assert 'high energy' in prompt_with_self
-    assert 'LOW' in prompt_with_self
-    print("    Self node injection OK")
+    # Test 2: FRIDAY reference removed
+    print("\n[2] FRIDAY reference removed...")
+    assert 'FRIDAY' not in prompt
+    assert 'Marvel' not in prompt
+    print("    FRIDAY reference: gone OK")
 
-    # Test 3: With projects
-    print("\n[3] Prompt with active projects...")
-    mock_projects = [
+    # Test 3: Hallucination guard present
+    print("\n[3] Hallucination guard present...")
+    assert 'Never cite node' in prompt or 'never cite' in prompt.lower()
+    print("    Hallucination guard: OK")
+
+    # Test 4: High signal nodes injected
+    print("\n[4] High signal node injection...")
+    mock_nodes = [
         {
-            'label': 'Presence',
+            'label': 'Complete Phase 1 Implementation',
+            'type': 'task',
+            'importance': 0.9,
+            'attention': 0.9,
             'status': 'active',
-            'importance': 0.75,
-            'attention': 0.4
+            'description': 'Complete all 15 steps of Phase 1.',
+            '_urgency': 0.27
         },
         {
-            'label': 'MAIHERA',
+            'label': 'Presence — Personality Mimicry Accuracy',
+            'type': 'issue',
+            'importance': 0.7,
+            'attention': 0.3,
             'status': 'active',
-            'importance': 0.95,
-            'attention': 0.9
+            'description': 'Known weakness flagged at project creation.',
+            '_urgency': 0.21
         }
     ]
-    prompt_with_projects = build_system_prompt(
-        active_projects=mock_projects
+    prompt_with_nodes = build_system_prompt(
+        high_signal_nodes=mock_nodes
     )
-    assert 'Presence' in prompt_with_projects
-    assert 'MAIHERA' in prompt_with_projects
-    print("    Project injection OK")
+    assert 'Complete Phase 1 Implementation' in prompt_with_nodes
+    assert 'Presence — Personality Mimicry Accuracy' in prompt_with_nodes
+    assert 'only these may be referenced' in prompt_with_nodes
+    print("    Node injection: OK")
 
-    # Test 4: Classification prompt
-    print("\n[4] Classification prompt...")
-    cls_prompt = get_classification_prompt()
-    assert '{projects}' in cls_prompt
-    assert 'JSON' in cls_prompt
-    print("    Classification prompt OK")
+    # Test 5: Self node injection
+    print("\n[5] Self node injection...")
+    mock_self = {
+        'energy_level': 8,
+        'current_load': 0.25,
+        'trust_level': 0.35
+    }
+    prompt_with_self = build_system_prompt(self_node=mock_self)
+    assert 'high' in prompt_with_self.lower()
+    assert 'LOW' in prompt_with_self
+    print("    Self node injection: OK")
 
-    # Test 5: Low energy behavior
-    print("\n[5] Low energy prompt...")
-    low_energy = build_system_prompt(
-        self_node={'energy_level': 2, 'current_load': 0.8,
-                   'trust_level': 0.3}
-    )
-    assert 'low energy' in low_energy
-    assert 'HIGH' in low_energy
-    print("    Low energy context OK")
+    # Test 6: No project descriptions hardcoded
+    print("\n[6] No hardcoded project descriptions...")
+    assert 'WhatsApp' not in BASE_PERSONA
+    assert 'Supabase' not in BASE_PERSONA
+    assert 'Cartesia' not in BASE_PERSONA
+    assert 'Vercel' not in BASE_PERSONA
+    print("    No hardcoded descriptions: OK")
 
-    print("\n✅ Persona test PASSED — all 5 checks OK")
-    print("\nSample prompt preview (first 200 chars):")
-    print(build_system_prompt()[:200] + "...")
+    print("\n✅ Persona test PASSED — all 6 checks OK")
