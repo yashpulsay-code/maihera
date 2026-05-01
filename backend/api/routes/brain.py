@@ -257,7 +257,29 @@ async def search_nodes(
 @router.get("/stats")
 async def get_stats():
     brain = get_brain()
-    return brain.get_stats()
+    stats = brain.get_stats()
+
+    # Storage estimate for Neo4j Aura Free (200MB limit)
+    # Rough estimate: ~2KB per node average (properties + index)
+    # ~0.5KB per edge average
+    node_count = stats.get('node_count', 0)
+    edge_count = stats.get('edge_count', 0)
+    estimated_kb = (node_count * 2.0) + (edge_count * 0.5)
+    estimated_mb = estimated_kb / 1024
+    limit_mb = 200.0
+    usage_percent = (estimated_mb / limit_mb) * 100
+
+    stats['storage_estimate'] = {
+        'estimated_mb': round(estimated_mb, 4),
+        'limit_mb': limit_mb,
+        'usage_percent': round(usage_percent, 4),
+        'note': (
+            'Rough estimate only — actual usage visible '
+            'at console.neo4j.io'
+        )
+    }
+
+    return stats
 
 
 @router.get("/high-signal")
