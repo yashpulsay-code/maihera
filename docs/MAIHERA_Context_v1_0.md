@@ -827,7 +827,74 @@ Updated at the end of every phase. Use this to carry context forward into the ne
 
 ---
 
-*Phase 1 through Phase 7 — to be completed and logged here as each phase concludes.*
+### Phase 1 — The Brain is Born
+
+**Status:** Complete
+
+**What was built:**
+- Neo4j Aura Free instance with full graph schema —
+  constraints, indexes, all node types and edge types
+- SQLite operational database — task state, decision log,
+  signal decay log, session log, brain export log
+- ChromaDB vector store — semantic memory with local
+  sentence-transformers embeddings (all-MiniLM-L6-v2)
+- BrainService — single interface to Neo4j, coordinating
+  ChromaDB and SQLite. Signal decay, urgency computation,
+  resistance recomputation, graph queries all implemented.
+- Signal decay worker — APScheduler firing every hour,
+  exponential decay with 0.05 floor
+- LLM Router — Ollama cloud primary, Groq fallback.
+  Quota tracking, cascade logic, request logging.
+- MAIHERA persona system prompt — dynamic, context-aware,
+  injecting self node and project context
+- Node classifier — two-stage: keyword prescan + LLM via
+  Groq. JSON parsing with markdown fence stripping.
+- FastAPI application — full REST API, WebSocket brain
+  graph updates, lifespan service management
+- Seed data — structural scaffolding only. 8 nodes, 5
+  edges. MAIHERA learns about projects in Phase 3+.
+- Terminal chat CLI — Phase 1 testing interface
+- Integration tests — 20 tests, all passing
+
+**Key decisions made during Phase 1:**
+- Claude Code runs via Ollama — consumes weekly quota fast.
+  Switched to direct code delivery for all simple files.
+  Only 2 Claude Code sessions used in Phase 1 total.
+- Ollama cloud free tier: session + weekly limits.
+  All MAIHERA runtime tests use Groq only (Ollama maxed
+  artificially before routing).
+- NEO4J_USER is e6514492 (custom Aura username).
+- Seed data philosophy: structural anchors only.
+  No hardcoded project knowledge — MAIHERA explores
+  and learns from Phase 3 onwards.
+- workspace field added to NodeSchema (personal/office/shared)
+  — not in original architecture, added during Phase 1.
+- FRIDAY reference removed from persona backlog.
+  Behavioral instructions are the real levers, not
+  character references.
+- Chat endpoint currently hallucinates node references —
+  does not inject real graph context into prompt yet.
+  Fixed in Phase 2 when high-signal nodes are injected.
+
+**Pending items for Phase 1 end review:**
+- Persona system prompt needs full rewrite:
+  remove hardcoded project descriptions, remove FRIDAY
+  reference, add instruction never to cite non-existent nodes
+- Add workspace field properly to NodeSchema enum
+- Chat endpoint: inject actual high-signal nodes into
+  system prompt context
+
+**Known issues:**
+- MAIHERA hallucinates node IDs in chat responses —
+  she cannot see her own brain graph yet
+- Neo4j Aura Free pauses after 3 days inactivity —
+  add heartbeat or resume manually at console.neo4j.io
+
+**Next phase:** Phase 2 — The Interface Lives
+
+---
+
+
 
 ---
 
