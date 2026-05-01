@@ -5,6 +5,7 @@ Nothing queries Neo4j directly except this file.
 """
 
 import os
+import json
 import math
 import logging
 from datetime import datetime
@@ -597,23 +598,161 @@ class BrainService:
             'edge_count': edge_count,
             'type_counts': type_counts
         }
+    
+    def export_to_json(self, export_dir: Optional[str] = None) -> str:
+        """
+        Export all nodes and edges to a JSON file.
+        Saves to backups/ directory by default.
+        Returns the path of the created export file.
+        This is a recoverable data snapshot — not a true DB backup
+        but sufficient to reconstruct the graph if needed.
+        """
+        if export_dir:
+            backup_path = Path(export_dir)
+        else:
+            backup_path = (
+                Path(__file__).parent.parent.parent / 'backups'
+            )
+        backup_path.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        filename = f"maihera_brain_{timestamp}.json"
+        filepath = backup_path / filename
+
+        with self.driver.session() as session:
+            node_result = session.run("""
+                MATCH (n:Node)
+                RETURN properties(n) as props
+                ORDER BY n.created_at ASC
+            """)
+            nodes = [dict(r['props']) for r in node_result]
+
+            edge_result = session.run("""
+                MATCH (a:Node)-[r]->(b:Node)
+                RETURN type(r) as type,
+                       a.id as from_id,
+                       b.id as to_id,
+                       properties(r) as props
+            """)
+            edges = [
+                {
+                    'type': r['type'],
+                    'from_id': r['from_id'],
+                    'to_id': r['to_id'],
+                    'properties': dict(r['props'])
+                }
+                for r in edge_result
+            ]
+
+        export_data = {
+            'exported_at': datetime.utcnow().isoformat(),
+            'node_count': len(nodes),
+            'edge_count': len(edges),
+            'nodes': nodes,
+            'edges': edges
+        }
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(export_data, f, indent=2, default=str)
+
+        # Log to SQLite
+        self.db.log_export(
+            node_count=len(nodes),
+            edge_count=len(edges),
+            export_path=str(filepath),
+            status='success'
+        )
+
+        logger.info(
+            "Brain exported: %d nodes, %d edges → %s",
+            len(nodes), len(edges), filepath
+        )
+        return str(filepath)
+
+
+def get_driver_with_retry() -> object:
+    """
+    Create Neo4j driver with exponential backoff retry.
+    Handles Neo4j Aura Free inactivity pauses gracefully.
+    Retries every 30 seconds for up to 10 minutes.
+    Surfaces a clear alert if all retries fail.
+    """
+    import time
+
+    uri = os.getenv('NEO4J_URI')
+    user = os.getenv('NEO4J_USER')
+    password = os.getenv('NEO4J_PASSWORD')
+
+    if not all([uri, user, password]):
+        raise ValueError(
+            "Missing Neo4j credentials in .env — "
+            "NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD required"
+        )
+
+    max_attempts = 20          # 20 attempts × 30s = 10 minutes
+    wait_seconds = 30
+    attempt = 0
+
+    while attempt < max_attempts:
+        try:
+            driver = GraphDatabase.driver(uri, auth=(user, password))
+            driver.verify_connectivity()
+            if attempt > 0:
+                logger.info(
+                    "Neo4j reconnected after %d attempts.",
+                    attempt + 1
+                )
+            return driver
+
+        except Exception as e:
+            attempt += 1
+            if attempt == 1:
+                # First failure — likely Aura pause
+                logger.warning(
+                    "Neo4j connection failed. "
+                    "If using Aura Free, the instance may be paused. "
+                    "Resume at console.neo4j.io — "
+                    "retrying every %ds for up to 10 minutes...",
+                    wait_seconds
+                )
+                print(
+                    "\n⚠️  MAIHERA: Boss, Neo4j is not responding. "
+                    "If your Aura instance is paused, resume it at "
+                    "console.neo4j.io — I will keep retrying.\n"
+                )
+
+            if attempt >= max_attempts:
+                logger.critical(
+                    "Neo4j unreachable after %d attempts (%d minutes). "
+                    "Last error: %s",
+                    max_attempts,
+                    (max_attempts * wait_seconds) // 60,
+                    e
+                )
+                raise RuntimeError(
+                    "Boss, Neo4j is still unreachable after 10 minutes. "
+                    "Please resume the instance at console.neo4j.io "
+                    "and restart MAIHERA."
+                ) from e
+
+            logger.info(
+                "Retry %d/%d in %ds...",
+                attempt, max_attempts, wait_seconds
+            )
+            time.sleep(wait_seconds)
 
 
 def get_brain_service():
     """
     Factory function — creates and returns a fully
     initialized BrainService instance.
+    Uses retry logic for Neo4j connection.
     Use this in FastAPI lifespan and tests.
     """
     from brain.vector_store import VectorStore
     from brain.sqlite_store import DatabaseManager
 
-    uri = os.getenv('NEO4J_URI')
-    user = os.getenv('NEO4J_USER')
-    password = os.getenv('NEO4J_PASSWORD')
-
-    driver = GraphDatabase.driver(uri, auth=(user, password))
-    driver.verify_connectivity()
+    driver = get_driver_with_retry()
 
     vector_store = VectorStore()
     vector_store.initialize()
