@@ -890,6 +890,23 @@ Updated at the end of every phase. Use this to carry context forward into the ne
 - Neo4j Aura Free pauses after 3 days inactivity —
   add heartbeat or resume manually at console.neo4j.io
 
+**Phase 1 Review — Completed after initial build:**
+- WorkspaceType enum added to NodeSchema (personal/office/shared)
+- Brain export function — dumps nodes and edges to JSON
+  saved to backups/ directory
+- Weekly export scheduler — every Sunday 2AM via APScheduler
+- Neo4j heartbeat — every 30 minutes, prevents Aura pause
+- Neo4j connection retry with exponential backoff — 30s intervals,
+  10 minute maximum, surfaces alert to Yash if unreachable
+- Chat endpoint — injects real high-signal nodes and self node
+  into system prompt. MAIHERA now references real graph data.
+- Persona rewrite — FRIDAY reference removed, hallucination guard
+  added, proactivity conditional on having real context,
+  phase-aware capability list, no hardcoded project descriptions
+- Storage estimate added to /brain/stats endpoint
+- Test node cleanup — API test node and chat-generated test
+  nodes removed from graph
+
 **Next phase:** Phase 2 — The Interface Lives
 
 ---
