@@ -88,6 +88,41 @@ class DecayWorker:
             self.scheduler.shutdown(wait=False)
             logger.info("DecayWorker stopped.")
 
+    def add_nudge_job(self, nudge_service) -> None:
+        """
+        Register the nudge evaluation job — every 5 minutes.
+        Called from lifespan after NudgeService is initialized.
+        Separate from start() so NudgeService can be injected
+        after the scheduler is already running.
+        """
+        self.nudge_service = nudge_service
+        self._nudge_count = 0
+        self._last_nudge: datetime | None = None
+
+        self.scheduler.add_job(
+            func=self._run_nudge_evaluation,
+            trigger=IntervalTrigger(minutes=5),
+            id='nudge_evaluation',
+            name='MAIHERA Nudge Evaluation',
+            replace_existing=True,
+            misfire_grace_time=60
+        )
+        logger.info(
+            "DecayWorker: nudge evaluation job added — every 5 minutes."
+        )
+
+    async def _run_nudge_evaluation(self) -> None:
+        """
+        Every 5 minutes — evaluate brain graph for nudge-worthy nodes.
+        Delegates entirely to NudgeService.
+        """
+        try:
+            await self.nudge_service.evaluate()
+            self._nudge_count += 1
+            self._last_nudge = datetime.utcnow()
+        except Exception as e:
+            logger.error("DecayWorker: nudge evaluation error: %s", e)
+
     async def _run_decay(self) -> None:
         """
         Hourly decay job.
@@ -186,8 +221,9 @@ class DecayWorker:
         decay_job = self.scheduler.get_job('signal_decay')
         heartbeat_job = self.scheduler.get_job('neo4j_heartbeat')
         export_job = self.scheduler.get_job('weekly_export')
+        nudge_job = self.scheduler.get_job('nudge_evaluation')
 
-        return {
+        stats = {
             'running': self.scheduler.running,
             'decay': {
                 'total_runs': self._decay_count,
@@ -225,6 +261,17 @@ class DecayWorker:
             }
         }
 
+        if nudge_job:
+            stats['nudge'] = {
+                'total_runs': getattr(self, '_nudge_count', 0),
+                'last_run': (
+                    getattr(self, '_last_nudge', None).isoformat()
+                    if getattr(self, '_last_nudge', None) else None
+                ),
+                'next_run': str(nudge_job.next_run_time),
+            }
+
+        return stats
 
 if __name__ == "__main__":
     import asyncio

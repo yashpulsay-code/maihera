@@ -31,6 +31,7 @@ _classifier = None
 _decay_worker = None
 _ws_manager = None
 _voice_service = None
+_nudge_service = None
 
 
 @asynccontextmanager
@@ -45,19 +46,19 @@ async def lifespan(app: FastAPI):
     try:
         from api.websocket_manager import WebSocketManager
         _ws_manager = WebSocketManager()
-        logger.info("[1/7] WebSocket manager ready.")
+        logger.info("[1/8] WebSocket manager ready.")
 
         from brain.brain_service import get_brain_service
         _brain_service, _neo4j_driver = get_brain_service()
-        logger.info("[2/7] Brain service ready.")
+        logger.info("[2/8] Brain service ready.")
 
         from llm.router import LLMRouter
         _llm_router = LLMRouter()
-        logger.info("[3/7] LLM router ready.")
+        logger.info("[3/8] LLM router ready.")
 
         from brain.classifier import NodeClassifier
         _classifier = NodeClassifier(llm_router=_llm_router)
-        logger.info("[4/7] Node classifier ready.")
+        logger.info("[4/8] Node classifier ready.")
 
         from api.routes import brain as brain_routes
         from api.routes import chat as chat_routes
@@ -65,18 +66,29 @@ async def lifespan(app: FastAPI):
         chat_routes.set_dependencies(
             _brain_service, _llm_router, _classifier
         )
-        logger.info("[5/7] Route dependencies injected.")
+        logger.info("[5/8] Route dependencies injected.")
 
         from workers.decay_worker import DecayWorker
         _decay_worker = DecayWorker(_brain_service)
         _decay_worker.start()
-        logger.info("[6/7] Decay worker started.")
+        logger.info("[6/8] Decay worker started.")
         
         from services.voice_service import VoiceService
         _voice_service = VoiceService()
         _voice_service.set_ws_manager(_ws_manager)
         _voice_service.start()
-        logger.info("[7/7] Voice service started.")
+        logger.info("[7/8] Voice service started.")
+
+        from services.nudge_service import NudgeService
+        _nudge_service = NudgeService(
+            brain_service=_brain_service,
+            voice_service=_voice_service,
+            db_manager=_brain_service.db
+        )
+        _nudge_service.set_ws_manager(_ws_manager)
+        _nudge_service.set_llm_router(_llm_router)
+        _decay_worker.add_nudge_job(_nudge_service)
+        logger.info("[8/8] Nudge service ready.")
 
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")

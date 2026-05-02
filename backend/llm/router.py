@@ -36,6 +36,7 @@ OLLAMA_MODELS = {
     'dream_mode':         'deepseek-v3.1:671b-cloud',
     'vision':             'qwen3-vl:235b-cloud',
     'default':            'gpt-oss:120b-cloud',
+    'nudge':              'gpt-oss:20b-cloud',
 }
 
 GROQ_MODELS = {
@@ -47,6 +48,7 @@ GROQ_MODELS = {
     'dream_mode':         'llama-3.3-70b-versatile',
     'vision':             'llama-3.3-70b-versatile',
     'default':            'llama-3.3-70b-versatile',
+    'nudge':              'llama-3.1-8b-instant',
 }
 
 # Task type → provider order (primary first, fallback second)
@@ -59,6 +61,7 @@ ROUTING_TABLE = {
     'dream_mode':         ['ollama', 'groq'],
     'vision':             ['ollama', 'groq'],
     'default':            ['ollama', 'groq'],
+    'nudge':              ['groq', 'ollama'],
 }
 
 
