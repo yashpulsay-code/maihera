@@ -1,7 +1,8 @@
 """
 MAIHERA Brain Layer — SQLite Operational Database
 Manages task state, decision log, signal decay audit,
-session tracking, and brain export/backup.
+session tracking, focus sessions, briefing log,
+and brain export/backup.
 """
 
 import os
@@ -9,7 +10,7 @@ import sqlite3
 import uuid
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
@@ -23,7 +24,8 @@ class DatabaseManager:
     """
     Single interface for all SQLite operations.
     Manages task state, decision log, decay audit,
-    session log, and brain export.
+    session log, focus sessions, briefing log,
+    and brain export.
     """
 
     def __init__(self, db_path: Optional[str] = None):
@@ -58,6 +60,8 @@ class DatabaseManager:
         self._create_signal_decay_log_table()
         self._create_session_log_table()
         self._create_brain_export_table()
+        self._create_focus_sessions_table()
+        self._create_briefing_log_table()
         self.connection.commit()
         logger.info("All SQLite tables initialized.")
 
@@ -129,6 +133,30 @@ class DatabaseManager:
                 status      TEXT NOT NULL CHECK(status IN (
                                 'success','failed'
                             ))
+            )
+        """)
+
+    def _create_focus_sessions_table(self) -> None:
+        self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS focus_sessions (
+                id               TEXT PRIMARY KEY,
+                started_at       TEXT NOT NULL,
+                ended_at         TEXT,
+                duration_minutes INTEGER,
+                energy_at_start  INTEGER,
+                pending_nudges   TEXT NOT NULL DEFAULT '[]',
+                delivered_at     TEXT
+            )
+        """)
+
+    def _create_briefing_log_table(self) -> None:
+        self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS briefing_log (
+                id           TEXT PRIMARY KEY,
+                delivered_at TEXT NOT NULL,
+                date_key     TEXT NOT NULL,
+                segment_count INTEGER NOT NULL DEFAULT 0,
+                completed    INTEGER NOT NULL DEFAULT 0
             )
         """)
 
@@ -349,18 +377,131 @@ class DatabaseManager:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    # ── Focus Sessions ────────────────────────────────────────────
+
+    def start_focus_session(
+        self,
+        session_id: str,
+        energy_level: Optional[int] = None
+    ) -> None:
+        now = datetime.utcnow().isoformat()
+        self.connection.execute("""
+            INSERT INTO focus_sessions
+                (id, started_at, energy_at_start, pending_nudges)
+            VALUES (?, ?, ?, '[]')
+        """, (session_id, now, energy_level))
+        self.connection.commit()
+        logger.info(f"Focus session started: {session_id}")
+
+    def append_nudge_to_session(
+        self,
+        session_id: str,
+        nudge: dict
+    ) -> None:
+        cursor = self.connection.execute(
+            "SELECT pending_nudges FROM focus_sessions WHERE id = ?",
+            (session_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            logger.warning(f"Focus session not found: {session_id}")
+            return
+        nudges = json.loads(row[0])
+        nudges.append(nudge)
+        self.connection.execute("""
+            UPDATE focus_sessions
+            SET pending_nudges = ?
+            WHERE id = ?
+        """, (json.dumps(nudges), session_id))
+        self.connection.commit()
+
+    def end_focus_session(
+        self,
+        session_id: str
+    ) -> list[dict]:
+        """
+        Close the focus session. Returns pending nudges sorted
+        by priority (urgent first) for end-of-session delivery.
+        """
+        now = datetime.utcnow().isoformat()
+        cursor = self.connection.execute(
+            "SELECT started_at, pending_nudges FROM focus_sessions WHERE id = ?",
+            (session_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            logger.warning(f"Focus session not found: {session_id}")
+            return []
+
+        started_at = datetime.fromisoformat(row[0])
+        ended_at = datetime.utcnow()
+        duration = int((ended_at - started_at).total_seconds() / 60)
+        nudges = json.loads(row[1])
+
+        self.connection.execute("""
+            UPDATE focus_sessions
+            SET ended_at = ?, duration_minutes = ?, delivered_at = ?
+            WHERE id = ?
+        """, (now, duration, now, session_id))
+        self.connection.commit()
+
+        priority_order = {'urgent': 0, 'normal': 1}
+        nudges.sort(key=lambda n: priority_order.get(n.get('priority', 'normal'), 1))
+        logger.info(f"Focus session ended: {session_id}, duration: {duration}m, nudges: {len(nudges)}")
+        return nudges
+
+    def get_active_focus_session(self) -> Optional[dict]:
+        """Return the currently open focus session, if any."""
+        cursor = self.connection.execute("""
+            SELECT * FROM focus_sessions
+            WHERE ended_at IS NULL
+            ORDER BY started_at DESC
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    # ── Briefing Log ──────────────────────────────────────────────
+
+    def log_briefing_delivered(
+        self,
+        segment_count: int = 0,
+        completed: bool = True
+    ) -> str:
+        briefing_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        date_key = date.today().isoformat()
+        self.connection.execute("""
+            INSERT INTO briefing_log
+                (id, delivered_at, date_key, segment_count, completed)
+            VALUES (?, ?, ?, ?, ?)
+        """, (briefing_id, now, date_key, segment_count, int(completed)))
+        self.connection.commit()
+        return briefing_id
+
+    def briefing_delivered_today(self) -> bool:
+        """Returns True if a completed briefing was delivered today."""
+        date_key = date.today().isoformat()
+        cursor = self.connection.execute("""
+            SELECT COUNT(*) as count FROM briefing_log
+            WHERE date_key = ? AND completed = 1
+        """, (date_key,))
+        row = cursor.fetchone()
+        return row[0] > 0
+
     # ── Stats ─────────────────────────────────────────────────────
 
     def get_stats(self) -> dict:
         stats = {}
         for table in [
             'task_state', 'decision_log',
-            'signal_decay_log', 'session_log', 'brain_export'
+            'signal_decay_log', 'session_log',
+            'brain_export', 'focus_sessions', 'briefing_log'
         ]:
             cursor = self.connection.execute(
                 f"SELECT COUNT(*) as count FROM {table}"
             )
-            stats[table] = cursor.fetchone()['count']
+            stats[table] = cursor.fetchone()[0]
         return stats
 
 

@@ -4,6 +4,7 @@ FastAPI entry point with lifespan management.
 Initializes all services on startup, shuts down cleanly.
 """
 
+import json
 import logging
 import os
 import sys
@@ -118,19 +119,58 @@ async def websocket_brain(websocket: WebSocket):
     if _ws_manager is None:
         await websocket.close(code=1011)
         return
+
     await _ws_manager.connect(websocket)
+
     try:
+        # Send full graph snapshot on connect
         if _brain_service:
             graph = _brain_service.get_full_graph()
-            await _ws_manager.broadcast_graph_update(
-                graph, event_type="initial_graph"
-            )
+            await _ws_manager.send_full_sync(graph)
+            await _ws_manager.send_system_status("watching")
+
+        # Inbound message loop
         while True:
-            data = await websocket.receive_text()
-            logger.debug("WebSocket message: %s", data[:50])
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+                msg_type = msg.get("type")
+                payload = msg.get("payload", {})
+
+                if msg_type == "session_start":
+                    logger.info("session_start received.")
+                    # Phase 2: briefing trigger goes here (Step 15)
+
+                elif msg_type == "chat":
+                    logger.info("chat message received.")
+                    # Phase 2: chat handler goes here (Step 14)
+
+                elif msg_type == "energy_checkin":
+                    level = payload.get("level")
+                    logger.info("energy_checkin: %s", level)
+                    # Phase 2: energy handler goes here (Step 17)
+
+                elif msg_type == "focus_mode":
+                    active = payload.get("active", False)
+                    session_id = payload.get("session_id")
+                    logger.info(
+                        "focus_mode: active=%s session=%s",
+                        active, session_id
+                    )
+                    # Phase 2: focus handler goes here (Step 14)
+
+                elif msg_type == "speech_next":
+                    logger.info("speech_next received.")
+                    # Phase 2: voice queue drain goes here (Step 9)
+
+                else:
+                    logger.debug("Unknown WS type: %s", msg_type)
+
+            except json.JSONDecodeError:
+                logger.warning("Non-JSON WebSocket message received.")
+
     except WebSocketDisconnect:
         _ws_manager.disconnect(websocket)
-
 
 @app.get("/health")
 async def health():
