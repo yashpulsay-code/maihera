@@ -85,17 +85,17 @@ class VoiceService:
         Runs in executor so it doesn't block the event loop.
         """
         client = self._get_client()
-        audio_bytes = client.tts.bytes(
+        response = client.tts.generate(
             model_id="sonic-2",
             transcript=text,
-            voice_id=CARTESIA_VOICE_ID,
+            voice={"mode": "id", "id": CARTESIA_VOICE_ID},
             output_format={
                 "container": "mp3",
                 "bit_rate": 128000,
                 "sample_rate": 44100,
             },
         )
-        return audio_bytes
+        return response.read()
 
     async def synthesize(self, text: str) -> bytes:
         """Async wrapper around blocking Cartesia call."""
