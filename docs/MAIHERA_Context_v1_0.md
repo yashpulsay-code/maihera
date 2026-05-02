@@ -911,6 +911,53 @@ Updated at the end of every phase. Use this to carry context forward into the ne
 
 ---
 
+### Phase 2 — The Interface Lives
+
+**Status:** Complete
+
+**What was built:**
+- Electron desktop app with frameless window and custom title bar
+- Three-panel layout: collapsible left panel, center 2D graph, right panel
+- react-force-graph-2d brain graph — live from Neo4j via WebSocket
+- Node color by type, size by importance, highlight on briefing
+- Typed WebSocket message schema — 13 message types, delta updates
+- Five Zustand stores: graph, voice, session, ui, chat
+- Cartesia voice service with speech queue and audio_out watcher
+- Proactive nudge engine — evaluates every 5 minutes, respects focus mode and office hours
+- Morning briefing — single combined chat message, sequential voice segments
+- Focus mode with SQLite session tracking and end-of-session nudge delivery
+- Right panel: chat mode and node inspect mode with signal bars
+- Bottom bar: text input, voice recording (Whisper), focus mode toggle
+- Voice transcription endpoint with Whisper (installed, ffmpeg pending)
+- Briefing route with trigger and reset endpoints
+- WS chat handler — LLM response via Groq, spoken via Cartesia
+
+**Key decisions made during Phase 2:**
+- react-force-graph-2d instead of Three.js — deferred to Phase 6
+- Cartesia confirmed as voice library — sonic-2 model
+- Silent flag on enqueue_speech prevents duplicate chat messages for briefing segments
+- Playback done event in VoiceService — drain queue waits for Electron signal before next item
+- WebkitAppRegion typed as ElectronStyle = React.CSSProperties & { WebkitAppRegion?: string }
+- Voice router import moved inside lifespan to avoid module-level path errors on Windows
+- python-multipart required for file upload endpoint
+- Briefing segment delay is a known issue — deferred to Phase 6 streaming TTS
+
+**Known issues:**
+- Inter-segment delay in briefing (~2-3s between sentences) — Cartesia API latency, fix in Phase 6
+- Whisper installed but ffmpeg not confirmed on PATH — voice input may fail silently
+- Top items in briefing include 'Yash' person node — signal thresholds need tuning in Phase 3
+- Workspace context pill in TopBar always empty — needs session detection logic in Phase 3
+
+**Decisions deferred to Phase 6:**
+- Three.js 3D graph with animations, pulse, glow, rings
+- Streaming TTS for low-latency briefing segments
+- Nudge float cards above graph
+- Node inspect card near the node
+
+**Next phase:** Phase 3 — MAIHERA Connects to Your World
+
+---
+
 
 
 ---
