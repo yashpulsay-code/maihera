@@ -599,6 +599,16 @@ class BrainService:
             'type_counts': type_counts
         }
     
+    def update_self_node_energy(self, energy_level: int) -> None:
+        """Update energy_level on the self node."""
+        with self.driver.session() as session:
+            session.run("""
+                MATCH (n:Node {type: 'self'})
+                SET n.energy_level = $level,
+                    n.last_touched = $now
+            """, level=energy_level, now=datetime.utcnow().isoformat())
+        logger.info("Self node energy updated: %d", energy_level)
+    
     def export_to_json(self, export_dir: Optional[str] = None) -> str:
         """
         Export all nodes and edges to a JSON file.

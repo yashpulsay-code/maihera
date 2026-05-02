@@ -4,6 +4,7 @@ FastAPI entry point with lifespan management.
 Initializes all services on startup, shuts down cleanly.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -38,6 +39,7 @@ _nudge_service = None
 async def lifespan(app: FastAPI):
     global _brain_service, _neo4j_driver, _llm_router
     global _classifier, _decay_worker, _ws_manager
+    global _voice_service, _nudge_service
 
     logger.info("=" * 50)
     logger.info("MAIHERA starting up...")
@@ -62,10 +64,12 @@ async def lifespan(app: FastAPI):
 
         from api.routes import brain as brain_routes
         from api.routes import chat as chat_routes
+        from api.routes.voice import router as voice_router
         brain_routes.set_dependencies(_brain_service, _ws_manager)
         chat_routes.set_dependencies(
             _brain_service, _llm_router, _classifier
         )
+        app.include_router(voice_router)
         logger.info("[5/8] Route dependencies injected.")
 
         from workers.decay_worker import DecayWorker
@@ -161,7 +165,10 @@ async def websocket_brain(websocket: WebSocket):
 
                 if msg_type == "session_start":
                     logger.info("session_start received.")
-                    # Phase 2: briefing trigger goes here (Step 15)
+                    if _nudge_service:
+                        asyncio.create_task(
+                            _nudge_service.trigger_morning_briefing()
+                        )
 
                 elif msg_type == "chat":
                     logger.info("chat message received.")
@@ -170,16 +177,42 @@ async def websocket_brain(websocket: WebSocket):
                 elif msg_type == "energy_checkin":
                     level = payload.get("level")
                     logger.info("energy_checkin: %s", level)
-                    # Phase 2: energy handler goes here (Step 17)
+                    if level is not None and _brain_service:
+                        _brain_service.update_self_node_energy(int(level))
+                        if _nudge_service:
+                            from services.nudge_service import low_energy_mode
+                            import services.nudge_service as ns
+                            ns.low_energy_mode = int(level) <= 3
+                        await _ws_manager.send_system_status("watching")
 
                 elif msg_type == "focus_mode":
                     active = payload.get("active", False)
                     session_id = payload.get("session_id")
+                    energy_level = payload.get("energy_level")
                     logger.info(
                         "focus_mode: active=%s session=%s",
                         active, session_id
                     )
-                    # Phase 2: focus handler goes here (Step 14)
+                    if _nudge_service and _brain_service:
+                        if active and session_id:
+                            _brain_service.db.start_focus_session(
+                                session_id=session_id,
+                                energy_level=energy_level
+                            )
+                            await _ws_manager.send_focus_mode_change(
+                                active=True,
+                                session_id=session_id
+                            )
+                        elif not active and session_id:
+                            asyncio.create_task(
+                                _nudge_service.deliver_focus_session_summary(
+                                    session_id
+                                )
+                            )
+                            await _ws_manager.send_focus_mode_change(
+                                active=False,
+                                session_id=None
+                            )
 
                 elif msg_type == "speech_next":
                     logger.info("speech_next received.")

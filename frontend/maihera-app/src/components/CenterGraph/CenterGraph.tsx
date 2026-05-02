@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo } from 'react'
+import { useRef, useEffect, useCallback, useMemo, useState } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import { useGraphStore } from '../../stores/graphStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -17,20 +17,16 @@ export function CenterGraph() {
   const getForceGraphData = useGraphStore(s => s.getForceGraphData)
   const { highlightedNodeIds, selectNode } = useUIStore()
 
-  const dimensions = useRef({ width: 800, height: 600 })
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
 
   useEffect(() => {
     if (!containerRef.current) return
     const observer = new ResizeObserver(entries => {
       for (const entry of entries) {
-        dimensions.current = {
+        setDimensions({
           width: entry.contentRect.width,
           height: entry.contentRect.height,
-        }
-        if (graphRef.current) {
-          graphRef.current.width(entry.contentRect.width)
-          graphRef.current.height(entry.contentRect.height)
-        }
+        })
       }
     })
     observer.observe(containerRef.current)
@@ -84,8 +80,8 @@ export function CenterGraph() {
       <ForceGraph2D
         ref={graphRef}
         graphData={graphData}
-        width={dimensions.current.width}
-        height={dimensions.current.height}
+        width={dimensions.width}
+        height={dimensions.height}
         backgroundColor='#080c14'
         nodeColor={nodeColor as any}
         nodeVal={nodeSize as any}
