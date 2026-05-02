@@ -30,6 +30,7 @@ _llm_router = None
 _classifier = None
 _decay_worker = None
 _ws_manager = None
+_voice_service = None
 
 
 @asynccontextmanager
@@ -44,19 +45,19 @@ async def lifespan(app: FastAPI):
     try:
         from api.websocket_manager import WebSocketManager
         _ws_manager = WebSocketManager()
-        logger.info("[1/6] WebSocket manager ready.")
+        logger.info("[1/7] WebSocket manager ready.")
 
         from brain.brain_service import get_brain_service
         _brain_service, _neo4j_driver = get_brain_service()
-        logger.info("[2/6] Brain service ready.")
+        logger.info("[2/7] Brain service ready.")
 
         from llm.router import LLMRouter
         _llm_router = LLMRouter()
-        logger.info("[3/6] LLM router ready.")
+        logger.info("[3/7] LLM router ready.")
 
         from brain.classifier import NodeClassifier
         _classifier = NodeClassifier(llm_router=_llm_router)
-        logger.info("[4/6] Node classifier ready.")
+        logger.info("[4/7] Node classifier ready.")
 
         from api.routes import brain as brain_routes
         from api.routes import chat as chat_routes
@@ -64,12 +65,18 @@ async def lifespan(app: FastAPI):
         chat_routes.set_dependencies(
             _brain_service, _llm_router, _classifier
         )
-        logger.info("[5/6] Route dependencies injected.")
+        logger.info("[5/7] Route dependencies injected.")
 
         from workers.decay_worker import DecayWorker
         _decay_worker = DecayWorker(_brain_service)
         _decay_worker.start()
-        logger.info("[6/6] Decay worker started.")
+        logger.info("[6/7] Decay worker started.")
+        
+        from services.voice_service import VoiceService
+        _voice_service = VoiceService()
+        _voice_service.set_ws_manager(_ws_manager)
+        _voice_service.start()
+        logger.info("[7/7] Voice service started.")
 
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")
@@ -82,6 +89,9 @@ async def lifespan(app: FastAPI):
         if _decay_worker:
             _decay_worker.stop()
             logger.info("Decay worker stopped.")
+        if _voice_service:
+            _voice_service.stop()
+            logger.info("Voice service stopped.")
         if _neo4j_driver:
             _neo4j_driver.close()
             logger.info("Neo4j driver closed.")
@@ -91,7 +101,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MAIHERA",
     description="M.A.I.H.E.R.A — Mai He Raja, Mai He Rani",
-    version="0.1.0-phase1",
+    version="0.2.0-phase2",
     lifespan=lifespan
 )
 
@@ -176,7 +186,7 @@ async def websocket_brain(websocket: WebSocket):
 async def health():
     return {
         "status": "live",
-        "version": "0.1.0-phase1",
+        "version": "0.2.0-phase2",
         "message": "MAIHERA is running, Boss."
     }
 
