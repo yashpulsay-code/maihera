@@ -62,8 +62,14 @@ class VoiceService:
         self._is_speaking = False
         self._drain_task: Optional[asyncio.Task] = None
         self._client = None
+        self._playback_done = asyncio.Event()
+        self._playback_done.set()  
         AUDIO_OUT_DIR.mkdir(parents=True, exist_ok=True)
         logger.info("VoiceService initialized. Audio out: %s", AUDIO_OUT_DIR)
+    
+    def signal_playback_done(self) -> None:
+        """Called when Electron reports audio playback finished."""
+        self._playback_done.set()
 
     def set_ws_manager(self, ws_manager) -> None:
         """Inject WebSocket manager after lifespan init."""
@@ -130,19 +136,13 @@ class VoiceService:
         self,
         text: str,
         node_ids: list[str],
-        priority: str = "normal"
+        priority: str = "normal",
+        silent: bool = False
     ) -> None:
-        """
-        Add a speech item to the queue.
-        Immediately notifies frontend via WebSocket so it
-        knows speech is incoming.
-        """
         item = SpeechItem(text=text, node_ids=node_ids, priority=priority)
         await self._queue.put(item)
-        logger.info(
-            "Speech queued [%s]: %.50s...", priority, text
-        )
-        if self._ws_manager:
+        logger.info("Speech queued [%s]: %.50s...", priority, text)
+        if self._ws_manager and not silent:
             await self._ws_manager.send_maihera_speak(
                 text=text,
                 node_ids=node_ids,
@@ -153,7 +153,7 @@ class VoiceService:
         """
         Background task — runs continuously.
         Drains speech queue one item at a time.
-        Synthesizes audio, writes file, notifies frontend.
+        Waits for Electron playback signal before next item.
         """
         logger.info("Voice drain queue started.")
         while True:
@@ -165,6 +165,7 @@ class VoiceService:
                     await self._ws_manager.send_system_status("speaking")
 
                 try:
+                    self._playback_done.clear()
                     audio_bytes = await self.synthesize(item.text)
                     filename = self._write_audio_file(audio_bytes)
 
@@ -176,15 +177,21 @@ class VoiceService:
                             audio_file=filename
                         )
 
-                    # Estimate speech duration: ~150 words/min
-                    word_count = len(item.text.split())
-                    estimated_seconds = max(2.0, (word_count / 150) * 60)
-                    await asyncio.sleep(estimated_seconds)
+                    # Wait for Electron to signal playback complete
+                    # Timeout after 30 seconds as safety net
+                    try:
+                        await asyncio.wait_for(
+                            self._playback_done.wait(),
+                            timeout=30.0
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning("Playback timeout — moving to next item.")
 
                     self._cleanup_old_files()
 
                 except Exception as e:
                     logger.error("Speech synthesis failed: %s", e)
+                    self._playback_done.set()  # unblock on error
 
                 finally:
                     self._is_speaking = False

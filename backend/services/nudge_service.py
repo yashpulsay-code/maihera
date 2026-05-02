@@ -357,22 +357,32 @@ class NudgeService:
 
         segments = await self._build_briefing_segments()
 
-        for i, segment in enumerate(segments):
-            if self._ws_manager:
-                await self._ws_manager.send_briefing_segment(
-                    text=segment["text"],
-                    node_ids=segment["node_ids"],
-                    segment_index=i
-                )
+        # Collect all segments into one display message
+        full_briefing_text = " ".join(s["text"] for s in segments)
+        all_node_ids = list(set(
+            nid for s in segments for nid in s["node_ids"]
+        ))
+
+        # One chat message for the entire briefing
+        if self._ws_manager:
+            await self._ws_manager.send_maihera_speak(
+                text=full_briefing_text,
+                node_ids=all_node_ids,
+                priority="urgent"
+            )
+            await self._ws_manager.send_briefing_start()
+
+        # Speak each segment sequentially — voice only, no extra chat messages
+        for segment in segments:
             await self._voice.enqueue_speech(
                 text=segment["text"],
                 node_ids=segment["node_ids"],
-                priority="urgent"
+                priority="urgent",
+                silent=True
             )
-            # Wait for estimated speech before next segment
-            word_count = len(segment["text"].split())
-            wait = max(2.0, (word_count / 150) * 60)
-            await asyncio.sleep(wait + 0.5)
+
+        if self._ws_manager:
+            await self._ws_manager.send_briefing_end()
 
         if self._ws_manager:
             await self._ws_manager.send_briefing_end()

@@ -1,0 +1,14 @@
+[33mbffa7f3[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Phase 1 step 14 — Integration tests
+[33mf1213a9[m Phase 1 step 13 — Terminal chat CLI
+[33m2360250[m Phase 1 step 12 — Seed data (structural scaffolding only)
+[33m57d5907[m Phase 1 step 11 — FastAPI application
+[33m44eb0da[m Phase 1 step 10 — Node classifier
+[33medc4304[m Phase 1 step 9 — MAIHERA persona system prompt
+[33m5b91829[m Phase 1 step 8 — LLM Router
+[33m4fb0321[m Phase 1 step 7 — Signal decay worker
+[33m12d64c9[m Phase 1 step 6 — BrainService core interface
+[33m635d6a6[m Phase 1 step 5 — ChromaDB vector store
+[33mf76fdd5[m Phase 1 step 4 — SQLite operational database
+[33md60d175[m Phase 1 step 3 — Neo4j brain schema
+[33m7d9b163[m Phase 1 step 2 — Python environment and dependencies
+[33m6b506d0[m Phase 1 scaffold — brain is born

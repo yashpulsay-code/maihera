@@ -110,16 +110,17 @@ class WebSocketService {
           priority: p.priority,
           queued_at: msg.timestamp
         })
-        // If audio file is ready — trigger playback
         if (p.audio_file) {
+          // Playback trigger only — don't add duplicate chat message
           voice.setPendingAudio(p.audio_file)
+        } else {
+          // First notification — add to chat
+          chat.addMessage({
+            role: 'maihera',
+            text: p.text,
+            node_ids: p.node_ids
+          })
         }
-        // Add to chat as MAIHERA message
-        chat.addMessage({
-          role: 'maihera',
-          text: p.text,
-          node_ids: p.node_ids
-        })
         break
       }
 
@@ -131,11 +132,6 @@ class WebSocketService {
       case 'briefing_segment': {
         const p = payload as BriefingSegmentPayload
         ui.setHighlightedNodes(p.node_ids)
-        chat.addMessage({
-          role: 'maihera',
-          text: p.text,
-          node_ids: p.node_ids
-        })
         break
       }
 

@@ -34,6 +34,79 @@ _ws_manager = None
 _voice_service = None
 _nudge_service = None
 
+async def _handle_ws_chat(
+    text: str,
+    context_node_id: str | None,
+    brain_service,
+    llm_router,
+    ws_manager,
+    voice_service
+) -> None:
+    """Handle a chat message received via WebSocket."""
+    try:
+        await ws_manager.send_system_status("thinking")
+
+        from llm.persona import build_system_prompt
+
+        self_node = None
+        active_projects = []
+        high_signal_nodes = []
+
+        projects = brain_service.list_nodes(node_type='project')
+        active_projects = [p for p in projects if p.get('status') == 'active']
+
+        all_persons = brain_service.list_nodes(node_type='person')
+        for p in all_persons:
+            if p.get('label') == 'Yash':
+                self_node = p
+                break
+
+        high_signal_nodes = brain_service.get_high_signal_nodes(
+            importance_threshold=0.5,
+            attention_threshold=0.2
+        )
+
+        # If a node was clicked before asking, inject its context
+        extra_context = ""
+        if context_node_id:
+            node = brain_service.get_node(context_node_id)
+            if node:
+                extra_context = (
+                    f"\n\nThe user is asking about this specific node: "
+                    f"'{node.get('label')}' (type: {node.get('type')}, "
+                    f"status: {node.get('status')}). "
+                    f"Description: {node.get('description', 'none')}."
+                )
+
+        system_prompt = build_system_prompt(
+            self_node=self_node,
+            active_projects=active_projects,
+            high_signal_nodes=high_signal_nodes
+        ) + extra_context
+
+        response_text = await llm_router.route(
+            task_type='conversation',
+            messages=[{"role": "user", "content": text}],
+            system_prompt=system_prompt,
+            max_tokens=300
+        )
+
+        if not response_text:
+            return
+        
+        # Speak the response
+        if voice_service:
+            await voice_service.enqueue_speech(
+                text=response_text,
+                node_ids=[context_node_id] if context_node_id else [],
+                priority="normal"
+            )
+
+        await ws_manager.send_system_status("watching")
+
+    except Exception as e:
+        logger.error("WS chat handler error: %s", e)
+        await ws_manager.send_system_status("watching")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -65,11 +138,12 @@ async def lifespan(app: FastAPI):
         from api.routes import brain as brain_routes
         from api.routes import chat as chat_routes
         from api.routes.voice import router as voice_router
+        from api.routes.briefing import router as briefing_router  
+        from api.routes import briefing as briefing_routes          
         brain_routes.set_dependencies(_brain_service, _ws_manager)
-        chat_routes.set_dependencies(
-            _brain_service, _llm_router, _classifier
-        )
+        chat_routes.set_dependencies(_brain_service, _llm_router, _classifier)
         app.include_router(voice_router)
+        app.include_router(briefing_router)                         
         logger.info("[5/8] Route dependencies injected.")
 
         from workers.decay_worker import DecayWorker
@@ -92,6 +166,7 @@ async def lifespan(app: FastAPI):
         _nudge_service.set_ws_manager(_ws_manager)
         _nudge_service.set_llm_router(_llm_router)
         _decay_worker.add_nudge_job(_nudge_service)
+        briefing_routes.set_dependencies(_nudge_service)
         logger.info("[8/8] Nudge service ready.")
 
         logger.info("=" * 50)
@@ -171,8 +246,19 @@ async def websocket_brain(websocket: WebSocket):
                         )
 
                 elif msg_type == "chat":
-                    logger.info("chat message received.")
-                    # Phase 2: chat handler goes here (Step 14)
+                    text = payload.get("text", "").strip()
+                    context_node_id = payload.get("context_node_id")
+                    if not text:
+                        continue
+                    logger.info("chat via WS: %.60s", text)
+                    if _brain_service and _llm_router:
+                        asyncio.create_task(
+                            _handle_ws_chat(
+                                text, context_node_id,
+                                _brain_service, _llm_router,
+                                _ws_manager, _voice_service
+                            )
+                        )
 
                 elif msg_type == "energy_checkin":
                     level = payload.get("level")
@@ -215,8 +301,9 @@ async def websocket_brain(websocket: WebSocket):
                             )
 
                 elif msg_type == "speech_next":
-                    logger.info("speech_next received.")
-                    # Phase 2: voice queue drain goes here (Step 9)
+                    logger.info("speech_next received — playback complete.")
+                    if _voice_service:
+                        _voice_service.signal_playback_done()
 
                 else:
                     logger.debug("Unknown WS type: %s", msg_type)
