@@ -55,28 +55,28 @@ GROQ_MODELS = {
 
 # Gemini 2.5 Flash — primary Gemini tier (10 RPM, 500 RPD)
 GEMINI_FLASH_MODELS = {
-    'signal_update':      'gemini-2.5-flash-preview-05-20',
-    'classification':     'gemini-2.5-flash-preview-05-20',
-    'conversation':       'gemini-2.5-flash-preview-05-20',
-    'task_decomposition': 'gemini-2.5-flash-preview-05-20',
-    'code_analysis':      'gemini-2.5-flash-preview-05-20',
-    'dream_mode':         'gemini-2.5-flash-preview-05-20',
-    'vision':             'gemini-2.5-flash-preview-05-20',
-    'nudge':              'gemini-2.5-flash-preview-05-20',
-    'default':            'gemini-2.5-flash-preview-05-20',
+    'signal_update':      'gemini-2.5-flash',
+    'classification':     'gemini-2.5-flash',
+    'conversation':       'gemini-2.5-flash',
+    'task_decomposition': 'gemini-2.5-flash',
+    'code_analysis':      'gemini-2.5-flash',
+    'dream_mode':         'gemini-2.5-flash',
+    'vision':             'gemini-2.5-flash',
+    'nudge':              'gemini-2.5-flash',
+    'default':            'gemini-2.5-flash',
 }
 
 # Gemini 2.0 Flash — high-volume overflow tier (10 RPM, 1500 RPD)
 GEMINI_FLASH_LITE_MODELS = {
-    'signal_update':      'gemini-2.0-flash',
-    'classification':     'gemini-2.0-flash',
-    'conversation':       'gemini-2.0-flash',
-    'task_decomposition': 'gemini-2.0-flash',
-    'code_analysis':      'gemini-2.0-flash',
-    'dream_mode':         'gemini-2.0-flash',
-    'vision':             'gemini-2.0-flash',
-    'nudge':              'gemini-2.0-flash',
-    'default':            'gemini-2.0-flash',
+    'signal_update':      'gemini-2.0-flash-lite',
+    'classification':     'gemini-2.0-flash-lite',
+    'conversation':       'gemini-2.0-flash-lite',
+    'task_decomposition': 'gemini-2.0-flash-lite',
+    'code_analysis':      'gemini-2.0-flash-lite',
+    'dream_mode':         'gemini-2.0-flash-lite',
+    'vision':             'gemini-2.0-flash-lite',
+    'nudge':              'gemini-2.0-flash-lite',
+    'default':            'gemini-2.0-flash-lite',
 }
 
 OPENROUTER_MODELS = {
@@ -122,7 +122,7 @@ QUOTA_CONFIG = {
     },
     'gemini_flash_lite': {
         'daily':        1500,
-        'rpm':          10,
+        'rpm':          15,
         'window_hours': None,
     },
     'openrouter': {
@@ -347,7 +347,18 @@ class LLMRouter:
             data = response.json()
 
         try:
-            content = data['candidates'][0]['content']['parts'][0]['text']
+            candidate = data['candidates'][0]
+            # Gemini 2.5 Flash is a thinking model — content.parts may be
+            # absent if max_tokens is exhausted by reasoning tokens.
+            parts = candidate.get('content', {}).get('parts', [])
+            if not parts:
+                finish_reason = candidate.get('finishReason', 'UNKNOWN')
+                raise ValueError(
+                    f"Gemini returned empty content (finishReason: "
+                    f"{finish_reason}). Likely max_tokens too low for "
+                    f"thinking model — increase max_tokens."
+                )
+            content = parts[0]['text']
         except (KeyError, IndexError) as e:
             raise ValueError(
                 f"Unexpected Gemini response format: {data}"
@@ -538,7 +549,7 @@ if __name__ == "__main__":
                     'content': 'Reply with exactly two words: gemini ok'
                 }],
                 system_prompt=None,
-                max_tokens=10,
+                max_tokens=100,
                 task_type='classification',
                 tier='flash'
             )
