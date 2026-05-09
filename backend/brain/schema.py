@@ -47,6 +47,7 @@ class NodeStatus(str, Enum):
     COMPLETED = "completed"
     ARCHIVED = "archived"
     CHALLENGED = "challenged"
+    STALE = "stale"          # source has changed since last analysis
 
 class NodeVisibility(str, Enum):
     PRIVATE = "private"
@@ -128,9 +129,20 @@ class NodeSchema(BaseModel):
     focus_style: Optional[FocusStyle] = None
     current_load: float = Field(default=0.0, ge=0.0, le=1.0)
     trust_level: float = Field(default=0.3, ge=0.0, le=1.0)
+    # Provenance fields — Phase 3
+    evidence: list[str] = Field(default_factory=list)
+    source_ref: Optional[str] = None   # URI/ID of originating artifact
+                                        # gcal:event_id | github:commit/sha
+                                        # github:issue/42 | gmail:thread_id
+    last_verified: Optional[str] = None # ISO timestamp — when source last checked
+    is_stale: bool = False              # True when source changed since analysis
+    node_weight: float = Field(default=1.0, ge=0.5, le=1.5)
+                                        # epistemological confidence multiplier
+                                        # human-authored=1.0, system-gen=0.7
+                                        # dream=0.8, never decays
 
     @field_validator('importance', 'attention', 'resistance',
-                     'current_load', 'trust_level')
+                     'current_load', 'trust_level', 'node_weight')
     @classmethod
     def clamp_float(cls, v: float) -> float:
         return max(0.0, min(1.0, v))
