@@ -66,7 +66,6 @@ class GitHubWorker:
                         summary['needs_analysis'],
                     )
                     if summary['needs_analysis']:
-                        # Placeholder — full analysis built in B2b
                         logger.info(
                             "GitHubWorker: re-analysis queued "
                             "for Presence codebase changes."
@@ -77,7 +76,11 @@ class GitHubWorker:
                         self._poll_count
                     )
             except Exception as e:
-                logger.error("GitHubWorker: poll failed — %s", e)
+                import traceback
+                logger.error(
+                    "GitHubWorker: poll failed — %s\n%s",
+                    e, traceback.format_exc()
+                )
 
         loop = asyncio.new_event_loop()
         try:

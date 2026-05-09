@@ -62,6 +62,7 @@ class DatabaseManager:
         self._create_brain_export_table()
         self._create_focus_sessions_table()
         self._create_briefing_log_table()
+        self._create_github_state_table()
         self.connection.commit()
         logger.info("All SQLite tables initialized.")
 
@@ -157,6 +158,14 @@ class DatabaseManager:
                 date_key     TEXT NOT NULL,
                 segment_count INTEGER NOT NULL DEFAULT 0,
                 completed    INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+
+    def _create_github_state_table(self) -> None:
+        self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS github_state (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             )
         """)
 

@@ -256,14 +256,7 @@ class GitHubService:
     def _get_last_sha(self, brain_service) -> str | None:
         """Read last seen commit SHA from SQLite github_state table."""
         try:
-            brain_service.db.conn.execute("""
-                CREATE TABLE IF NOT EXISTS github_state (
-                    key   TEXT PRIMARY KEY,
-                    value TEXT
-                )
-            """)
-            brain_service.db.conn.commit()
-            cursor = brain_service.db.conn.execute(
+            cursor = brain_service.db.connection.execute(
                 "SELECT value FROM github_state WHERE key = ?",
                 ("presence_last_sha",)
             )
@@ -276,14 +269,14 @@ class GitHubService:
     def _store_last_sha(self, brain_service, sha: str) -> None:
         """Store latest seen commit SHA to SQLite."""
         try:
-            brain_service.db.conn.execute("""
+            brain_service.db.connection.execute("""
                 INSERT INTO github_state (key, value)
                 VALUES (?, ?)
                 ON CONFLICT(key) DO UPDATE SET value = excluded.value
             """, ("presence_last_sha", sha))
-            brain_service.db.conn.commit()
+            brain_service.db.connection.commit()
         except Exception as e:
-            logger.error("GitHubService: could not store SHA: %s", e)
+            logger.error("GitHubService: could not store SHA: %s", e)   
 
 
 # Module-level singleton
