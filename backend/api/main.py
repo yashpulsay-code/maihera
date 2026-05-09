@@ -177,6 +177,7 @@ async def lifespan(app: FastAPI):
         from api.routes import calendar as calendar_routes
         _calendar_service = CalendarService()
         _calendar_worker  = CalendarWorker(_calendar_service, _brain_service)
+        _calendar_worker.start() 
         calendar_routes.set_dependencies(_calendar_service, _brain_service)
         app.include_router(calendar_router)
         logger.info("[9/9] Calendar service ready.")
