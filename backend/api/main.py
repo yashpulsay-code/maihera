@@ -34,6 +34,7 @@ _ws_manager = None
 _voice_service = None
 _nudge_service = None
 _calendar_service = None
+_calendar_worker  = None
 
 async def _handle_ws_chat(
     text: str,
@@ -171,9 +172,11 @@ async def lifespan(app: FastAPI):
         logger.info("[8/9] Nudge service ready.")
 
         from services.calendar_service import CalendarService
+        from workers.calendar_worker import CalendarWorker
         from api.routes.calendar import router as calendar_router
         from api.routes import calendar as calendar_routes
         _calendar_service = CalendarService()
+        _calendar_worker  = CalendarWorker(_calendar_service, _brain_service)
         calendar_routes.set_dependencies(_calendar_service, _brain_service)
         app.include_router(calendar_router)
         logger.info("[9/9] Calendar service ready.")
@@ -192,6 +195,9 @@ async def lifespan(app: FastAPI):
         if _voice_service:
             _voice_service.stop()
             logger.info("Voice service stopped.")
+        if _calendar_worker:
+            _calendar_worker.stop()
+            logger.info("Calendar worker stopped.")
         if _neo4j_driver:
             _neo4j_driver.close()
             logger.info("Neo4j driver closed.")
