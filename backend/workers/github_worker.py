@@ -42,6 +42,7 @@ class GitHubWorker:
         self._last_summary   = {}
 
     def _run_poll(self) -> None:
+        """Scheduled poll job — runs in APScheduler background thread."""
         if _is_suppressed():
             logger.debug("GitHubWorker: suppressed window — skipping poll.")
             return
@@ -89,6 +90,8 @@ class GitHubWorker:
             loop.close()
 
     def start(self) -> None:
+        """Start the polling scheduler. No immediate poll — uses date trigger."""
+        # Recurring poll every 30 minutes
         self._scheduler.add_job(
             self._run_poll,
             trigger='interval',
@@ -96,12 +99,16 @@ class GitHubWorker:
             id='github_poll',
             replace_existing=True,
         )
-        self._scheduler.start()
-        logger.info(
-            "GitHubWorker: started — polling every 30 minutes."
+        # Initial poll 10 seconds after startup via date trigger
+        self._scheduler.add_job(
+            self._run_poll,
+            trigger='date',
+            run_date=datetime.utcnow() + timedelta(seconds=10),
+            id='github_initial_poll',
+            replace_existing=True
         )
-        self._run_poll()
-        logger.info("GitHubWorker: initial poll complete.")
+        self._scheduler.start()
+        logger.info("GitHubWorker: started — polling every 30 minutes.")
 
     def stop(self) -> None:
         if self._scheduler.running:
