@@ -172,6 +172,54 @@ class BrainService:
             "Signal update: node=%s %s=%.3f", node_id, signal, value
         )
 
+    def find_node_by_source_ref(self, source_ref: str) -> Optional[dict]:
+        """
+        Find a node by its source_ref field.
+        Used for deduplication in integration syncs.
+        Returns node dict or None if not found.
+        """
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (n:Node {source_ref: $source_ref})
+                RETURN properties(n) as props
+                LIMIT 1
+            """, source_ref=source_ref)
+            record = result.single()
+            if not record:
+                return None
+            return dict(record['props'])
+
+    def update_node_signals(
+        self,
+        node_id: str,
+        importance: Optional[float] = None,
+        attention: Optional[float] = None,
+        resistance: Optional[float] = None
+    ) -> None:
+        """
+        Update one or more signal fields in a single write.
+        Clamps all values to 0.0-1.0. Updates last_touched.
+        """
+        updates = {'last_touched': datetime.utcnow().isoformat()}
+        if importance is not None:
+            updates['importance'] = max(0.0, min(1.0, importance))
+        if attention is not None:
+            updates['attention'] = max(0.0, min(1.0, attention))
+        if resistance is not None:
+            updates['resistance'] = max(0.0, min(1.0, resistance))
+
+        with self.driver.session() as session:
+            session.run("""
+                MATCH (n:Node {id: $id})
+                SET n += $updates
+            """, id=node_id, updates=updates)
+
+        logger.debug(
+            "Signals updated for %s: %s",
+            node_id, {k: v for k, v in updates.items()
+                      if k != 'last_touched'}
+        )
+
     def list_nodes(
         self,
         project_id: Optional[str] = None,
@@ -209,11 +257,13 @@ class BrainService:
     def search_nodes(
         self,
         query: str,
-        project_id: Optional[str] = None
+        project_id: Optional[str] = None,
+        node_type: Optional[str] = None
     ) -> list[dict]:
         """
         Semantic search via ChromaDB.
         Enriches results with full Neo4j node data.
+        Optionally filters by node_type after retrieval.
         """
         chroma_results = self.vector_store.search_similar(
             query=query,
@@ -225,6 +275,8 @@ class BrainService:
         for r in chroma_results:
             node = self.get_node(r['node_id'])
             if node:
+                if node_type and node.get('type') != node_type:
+                    continue
                 node['_search_distance'] = r['distance']
                 enriched.append(node)
 
@@ -684,19 +736,18 @@ def get_driver_with_retry() -> object:
     """
     Create Neo4j driver with exponential backoff retry.
     Handles Neo4j Aura Free inactivity pauses gracefully.
-    Retries every 30 seconds for up to 10 minutes.
-    Surfaces a clear alert if all retries fail.
     """
     import time
+    from services.secrets_service import secrets
 
-    uri = os.getenv('NEO4J_URI')
-    user = os.getenv('NEO4J_USER')
-    password = os.getenv('NEO4J_PASSWORD')
+    uri      = secrets.get('NEO4J_URI')
+    user     = secrets.get('NEO4J_USER')
+    password = secrets.get('NEO4J_PASSWORD')
 
     if not all([uri, user, password]):
         raise ValueError(
-            "Missing Neo4j credentials in .env — "
-            "NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD required"
+            "Missing Neo4j credentials in keyring — "
+            "run: python services/secrets_service.py migrate"
         )
 
     max_attempts = 20          # 20 attempts × 30s = 10 minutes

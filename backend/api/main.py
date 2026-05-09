@@ -33,6 +33,7 @@ _decay_worker = None
 _ws_manager = None
 _voice_service = None
 _nudge_service = None
+_calendar_service = None
 
 async def _handle_ws_chat(
     text: str,
@@ -121,19 +122,19 @@ async def lifespan(app: FastAPI):
     try:
         from api.websocket_manager import WebSocketManager
         _ws_manager = WebSocketManager()
-        logger.info("[1/8] WebSocket manager ready.")
+        logger.info("[1/9] WebSocket manager ready.")
 
         from brain.brain_service import get_brain_service
         _brain_service, _neo4j_driver = get_brain_service()
-        logger.info("[2/8] Brain service ready.")
+        logger.info("[2/9] Brain service ready.")
 
         from llm.router import LLMRouter
         _llm_router = LLMRouter()
-        logger.info("[3/8] LLM router ready.")
+        logger.info("[3/9] LLM router ready.")
 
         from brain.classifier import NodeClassifier
         _classifier = NodeClassifier(llm_router=_llm_router)
-        logger.info("[4/8] Node classifier ready.")
+        logger.info("[4/9] Node classifier ready.")
 
         from api.routes import brain as brain_routes
         from api.routes import chat as chat_routes
@@ -144,18 +145,18 @@ async def lifespan(app: FastAPI):
         chat_routes.set_dependencies(_brain_service, _llm_router, _classifier)
         app.include_router(voice_router)
         app.include_router(briefing_router)                         
-        logger.info("[5/8] Route dependencies injected.")
+        logger.info("[5/9] Route dependencies injected.")
 
         from workers.decay_worker import DecayWorker
         _decay_worker = DecayWorker(_brain_service)
         _decay_worker.start()
-        logger.info("[6/8] Decay worker started.")
+        logger.info("[6/9] Decay worker started.")
         
         from services.voice_service import VoiceService
         _voice_service = VoiceService()
         _voice_service.set_ws_manager(_ws_manager)
         _voice_service.start()
-        logger.info("[7/8] Voice service started.")
+        logger.info("[7/9] Voice service started.")
 
         from services.nudge_service import NudgeService
         _nudge_service = NudgeService(
@@ -167,7 +168,15 @@ async def lifespan(app: FastAPI):
         _nudge_service.set_llm_router(_llm_router)
         _decay_worker.add_nudge_job(_nudge_service)
         briefing_routes.set_dependencies(_nudge_service)
-        logger.info("[8/8] Nudge service ready.")
+        logger.info("[8/9] Nudge service ready.")
+
+        from services.calendar_service import CalendarService
+        from api.routes.calendar import router as calendar_router
+        from api.routes import calendar as calendar_routes
+        _calendar_service = CalendarService()
+        calendar_routes.set_dependencies(_calendar_service, _brain_service)
+        app.include_router(calendar_router)
+        logger.info("[9/9] Calendar service ready.")
 
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")
@@ -192,7 +201,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MAIHERA",
     description="M.A.I.H.E.R.A — Mai He Raja, Mai He Rani",
-    version="0.2.0-phase2",
+    version="0.3.0-phase3",
     lifespan=lifespan
 )
 

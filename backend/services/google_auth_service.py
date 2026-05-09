@@ -142,6 +142,18 @@ class GoogleAuthService:
         if creds.expired and not creds.refresh_token:
             return False
         return True
+    
+    def get_calendar_service(self):
+        """Return authenticated Google Calendar API resource."""
+        from googleapiclient.discovery import build
+        creds = self.get_credentials()
+        return build('calendar', 'v3', credentials=creds)
+
+    def get_gmail_service(self):
+        """Return authenticated Gmail API resource."""
+        from googleapiclient.discovery import build
+        creds = self.get_credentials()
+        return build('gmail', 'v1', credentials=creds)
 
     def revoke(self) -> None:
         """Clear all stored tokens from keyring."""
