@@ -19,6 +19,10 @@ from groq import Groq
 
 load_dotenv(Path(__file__).parent.parent / '.env')
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from services.secrets_service import secrets
+
 logger = logging.getLogger(__name__)
 
 
@@ -228,11 +232,11 @@ class LLMRouter:
     def __init__(self):
         ollama_session_cap      = int(os.getenv('OLLAMA_CLOUD_SESSION_CAP', '20'))
         self.ollama_base_url    = os.getenv('OLLAMA_CLOUD_BASE_URL', 'https://ollama.com/api')
-        self.ollama_api_key     = os.getenv('OLLAMA_CLOUD_API_KEY', '')
-        self.gemini_api_key     = os.getenv('GEMINI_API_KEY', '')
-        self.openrouter_api_key = os.getenv('OPENROUTER_API_KEY', '')
+        self.ollama_api_key     = secrets.get('OLLAMA_CLOUD_API_KEY') or ''
+        self.gemini_api_key     = secrets.get('GEMINI_API_KEY') or ''
+        self.openrouter_api_key = secrets.get('OPENROUTER_API_KEY') or ''
 
-        self.groq_client = Groq(api_key=os.getenv('GROQ_API_KEY', ''))
+        self.groq_client = Groq(api_key=secrets.get('GROQ_API_KEY') or '')
 
         self._quotas: dict[str, ProviderQuota] = {
             'ollama':           ProviderQuota('ollama',           QUOTA_CONFIG['ollama'],

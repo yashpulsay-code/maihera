@@ -197,13 +197,17 @@ def setup_schema(driver) -> None:
 
 def get_driver():
     """Create and return a Neo4j driver from environment."""
-    uri = os.getenv('NEO4J_URI')
-    user = os.getenv('NEO4J_USER')
-    password = os.getenv('NEO4J_PASSWORD')
+    from services.secrets_service import secrets
+
+    uri      = secrets.get('NEO4J_URI')
+    user     = secrets.get('NEO4J_USER')
+    password = secrets.get('NEO4J_PASSWORD')
+
     if not all([uri, user, password]):
         raise ValueError(
-            "Missing Neo4j credentials in .env — "
-            "NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD required"
+            "Missing Neo4j credentials in keyring — "
+            "NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD required. "
+            "Run: python services/secrets_service.py migrate"
         )
     return GraphDatabase.driver(uri, auth=(user, password))
 

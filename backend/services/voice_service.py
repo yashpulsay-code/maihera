@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from services.secrets_service import secrets
 
 from dotenv import load_dotenv
 
