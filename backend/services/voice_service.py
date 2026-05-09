@@ -19,8 +19,8 @@ load_dotenv(Path(__file__).parent.parent / '.env')
 
 logger = logging.getLogger(__name__)
 
-CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "")
-CARTESIA_VOICE_ID = os.getenv("CARTESIA_VOICE_ID", "")
+CARTESIA_API_KEY = secrets.get("CARTESIA_API_KEY") or ""
+CARTESIA_VOICE_ID = secrets.get("CARTESIA_VOICE_ID") or ""
 AUDIO_OUT_DIR = Path(__file__).parent.parent / "audio_out"
 
 
@@ -80,7 +80,10 @@ class VoiceService:
         """Lazy-init Cartesia client."""
         if self._client is None:
             if not CARTESIA_API_KEY:
-                raise RuntimeError("CARTESIA_API_KEY not set in .env")
+                raise RuntimeError(
+                    "CARTESIA_API_KEY not found — "
+                    "run: python services/secrets_service.py migrate"
+                )
             from cartesia import Cartesia
             self._client = Cartesia(api_key=CARTESIA_API_KEY)
             logger.info("Cartesia client initialized.")
