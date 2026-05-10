@@ -117,6 +117,8 @@ async def lifespan(app: FastAPI):
     global _brain_service, _neo4j_driver, _llm_router
     global _classifier, _decay_worker, _ws_manager
     global _voice_service, _nudge_service
+    global _calendar_service, _calendar_worker
+    global _github_service, _github_worker
 
     logger.info("=" * 50)
     logger.info("MAIHERA starting up...")
@@ -190,6 +192,12 @@ async def lifespan(app: FastAPI):
         _github_worker  = GitHubWorker(_github_service, _brain_service)
         _github_worker.start()
         logger.info("[10/10] GitHub service ready.")
+
+        from api.routes.analysis import router as analysis_router
+        from api.routes import analysis as analysis_routes
+        analysis_routes.set_dependencies(_brain_service, _llm_router)
+        app.include_router(analysis_router)
+        logger.info("[11/11] Analysis routes ready.")
 
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")
@@ -346,7 +354,7 @@ async def websocket_brain(websocket: WebSocket):
 async def health():
     return {
         "status": "live",
-        "version": "0.2.0-phase2",
+        "version": "0.3.0-phase3",
         "message": "MAIHERA is running, Boss."
     }
 
