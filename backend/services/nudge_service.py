@@ -396,11 +396,26 @@ class NudgeService:
             len(segments)
         )
 
-        # Initiate standup after briefing if applicable
+
         from services.standup_service import standup_service
-        if standup_service.should_run_today(self._brain):
-            import asyncio
-            await asyncio.sleep(1)  # brief pause after briefing
+        from services.weekly_review_service import weekly_review_service
+        import datetime as dt
+
+        is_sunday = dt.date.today().weekday() == 6
+
+        if is_sunday and weekly_review_service.should_run_today(self._brain):
+            # Run weekly review after briefing
+            asyncio.create_task(
+                weekly_review_service.run(
+                    brain_service=self._brain,
+                    llm_router=self._llm_router,
+                    voice_service=self._voice,
+                    ws_manager=self._ws_manager
+                )
+            )
+            logger.info("NudgeService: weekly review triggered.")
+        elif not is_sunday and standup_service.should_run_today(self._brain):
+            await asyncio.sleep(1)
             first_question = standup_service.get_first_question()
             await self._voice.enqueue_speech(
                 text=first_question,
