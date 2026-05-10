@@ -63,6 +63,8 @@ class DatabaseManager:
         self._create_focus_sessions_table()
         self._create_briefing_log_table()
         self._create_github_state_table()
+        self._create_orchestrator_tasks_table()
+        self._create_confirmations_table()
         self.connection.commit()
         logger.info("All SQLite tables initialized.")
 
@@ -166,6 +168,60 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS github_state (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            )
+        """)
+
+    def _create_orchestrator_tasks_table(self) -> None:
+        self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS orchestrator_tasks (
+                id                  TEXT PRIMARY KEY,
+                action_type         TEXT NOT NULL,
+                tool_name           TEXT NOT NULL,
+                payload             TEXT NOT NULL,
+                status              TEXT NOT NULL CHECK(status IN (
+                                        'pending_confirmation','queued','running',
+                                        'paused','completed','failed',
+                                        'cancelled','expired'
+                                    )),
+                requires_confirmation INTEGER NOT NULL DEFAULT 0,
+                confirmation_id     TEXT,
+                autonomy_tier       TEXT NOT NULL CHECK(autonomy_tier IN (
+                                        'always_allow','confirm_first',
+                                        'always_confirm','explicit_only'
+                                    )),
+                created_at          TEXT NOT NULL,
+                started_at          TEXT,
+                completed_at        TEXT,
+                retry_count         INTEGER NOT NULL DEFAULT 0,
+                max_retries         INTEGER NOT NULL DEFAULT 3,
+                last_error          TEXT,
+                result              TEXT,
+                verified            INTEGER NOT NULL DEFAULT 0,
+                verification_result TEXT,
+                parent_skill_id     TEXT,
+                skill_step_index    INTEGER,
+                FOREIGN KEY (confirmation_id)
+                    REFERENCES confirmations(id)
+            )
+        """)
+
+    def _create_confirmations_table(self) -> None:
+        self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS confirmations (
+                id              TEXT PRIMARY KEY,
+                task_id         TEXT NOT NULL,
+                action_summary  TEXT NOT NULL,
+                full_detail     TEXT NOT NULL,
+                status          TEXT NOT NULL CHECK(status IN (
+                                    'pending','confirmed',
+                                    'cancelled','expired','superseded'
+                                )),
+                created_at      TEXT NOT NULL,
+                expires_at      TEXT NOT NULL,
+                resolved_at     TEXT,
+                resolved_by     TEXT CHECK(resolved_by IN (
+                                    'voice','text','auto','timeout', NULL
+                                ))
             )
         """)
 
@@ -514,6 +570,155 @@ class DatabaseManager:
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
         """, (key, value))
         self.connection.commit()
+
+    # ── Orchestrator Tasks ────────────────────────────────────────
+
+    def create_orchestrator_task(self, task: dict) -> str:
+        now = datetime.utcnow().isoformat()
+        self.connection.execute("""
+            INSERT INTO orchestrator_tasks (
+                id, action_type, tool_name, payload, status,
+                requires_confirmation, confirmation_id, autonomy_tier,
+                created_at, max_retries, parent_skill_id, skill_step_index
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            task['id'],
+            task['action_type'],
+            task['tool_name'],
+            json.dumps(task['payload']),
+            task['status'],
+            int(task.get('requires_confirmation', False)),
+            task.get('confirmation_id'),
+            task['autonomy_tier'],
+            now,
+            task.get('max_retries', 3),
+            task.get('parent_skill_id'),
+            task.get('skill_step_index'),
+        ))
+        self.connection.commit()
+        return task['id']
+
+    def get_orchestrator_task(self, task_id: str) -> Optional[dict]:
+        cursor = self.connection.execute(
+            "SELECT * FROM orchestrator_tasks WHERE id = ?", (task_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def update_orchestrator_task(self, task_id: str, updates: dict) -> None:
+        allowed = {
+            'status', 'started_at', 'completed_at', 'retry_count',
+            'last_error', 'result', 'verified', 'verification_result',
+            'confirmation_id'
+        }
+        fields = {k: v for k, v in updates.items() if k in allowed}
+        if not fields:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [task_id]
+        self.connection.execute(
+            f"UPDATE orchestrator_tasks SET {set_clause} WHERE id = ?",
+            values
+        )
+        self.connection.commit()
+
+    def list_orchestrator_tasks(
+        self,
+        status: Optional[str] = None,
+        limit: int = 50
+    ) -> list[dict]:
+        query = "SELECT * FROM orchestrator_tasks WHERE 1=1"
+        params: list = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor = self.connection.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_last_completed_task_by_tool(
+        self, tool_name: str
+    ) -> Optional[dict]:
+        """Used by Orchestrator for cooldown checks."""
+        cursor = self.connection.execute("""
+            SELECT * FROM orchestrator_tasks
+            WHERE tool_name = ? AND status = 'completed'
+            ORDER BY completed_at DESC
+            LIMIT 1
+        """, (tool_name,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    # ── Confirmations ─────────────────────────────────────────────
+
+    def create_confirmation(self, confirmation: dict) -> str:
+        self.connection.execute("""
+            INSERT INTO confirmations (
+                id, task_id, action_summary, full_detail,
+                status, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, 'pending', ?, ?)
+        """, (
+            confirmation['id'],
+            confirmation['task_id'],
+            confirmation['action_summary'],
+            json.dumps(confirmation['full_detail']),
+            confirmation['created_at'],
+            confirmation['expires_at'],
+        ))
+        self.connection.commit()
+        return confirmation['id']
+
+    def get_confirmation(self, confirmation_id: str) -> Optional[dict]:
+        cursor = self.connection.execute(
+            "SELECT * FROM confirmations WHERE id = ?",
+            (confirmation_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_pending_confirmations(self) -> list[dict]:
+        cursor = self.connection.execute("""
+            SELECT * FROM confirmations
+            WHERE status = 'pending'
+            ORDER BY created_at ASC
+        """)
+        return [dict(row) for row in cursor.fetchall()]
+
+    def resolve_confirmation(
+        self,
+        confirmation_id: str,
+        status: str,
+        resolved_by: str
+    ) -> None:
+        now = datetime.utcnow().isoformat()
+        self.connection.execute("""
+            UPDATE confirmations
+            SET status = ?, resolved_at = ?, resolved_by = ?
+            WHERE id = ?
+        """, (status, now, resolved_by, confirmation_id))
+        self.connection.commit()
+
+    def expire_stale_confirmations(self) -> list[str]:
+        """
+        Mark all pending confirmations past their expires_at
+        as expired. Returns list of expired confirmation IDs.
+        """
+        now = datetime.utcnow().isoformat()
+        cursor = self.connection.execute("""
+            SELECT id FROM confirmations
+            WHERE status = 'pending' AND expires_at < ?
+        """, (now,))
+        expired_ids = [row[0] for row in cursor.fetchall()]
+        if expired_ids:
+            placeholders = ",".join("?" * len(expired_ids))
+            self.connection.execute(f"""
+                UPDATE confirmations
+                SET status = 'expired', resolved_at = ?
+                WHERE id IN ({placeholders})
+            """, [now] + expired_ids)
+            self.connection.commit()
+        return expired_ids
 
     # ── Stats ─────────────────────────────────────────────────────
 
