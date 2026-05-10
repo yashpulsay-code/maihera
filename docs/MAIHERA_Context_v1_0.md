@@ -958,6 +958,119 @@ Updated at the end of every phase. Use this to carry context forward into the ne
 
 ---
 
+### Phase 3 — MAIHERA Connects to Your World
+
+**Status:** Complete
+
+**What was built:**
+
+**Block A — Foundation**
+- Schema migration: provenance fields added to all nodes (evidence,
+  source_ref, last_verified, is_stale, node_weight). NodeStatus.STALE
+  added. Two new Neo4j indexes (stale, source_ref).
+- Router expansion: 5 providers — Ollama, Groq, Gemini 2.5 Flash,
+  Gemini 2.0 Flash Lite, OpenRouter. Sliding window RPM tracking
+  per provider. Quota config as data structure. Gemini 2.5 Flash
+  confirmed free tier with thinking model token headroom fix.
+- Secrets service: all 10 credentials migrated to Windows Credential
+  Manager via keyring. SecretsService abstraction with get/set/delete.
+  One-time migration script. .env now holds only non-sensitive config.
+
+**Block B — Integrations**
+- Google Calendar: OAuth consent flow, tokens in keyring (never on disk).
+  CalendarService with event fetch, node creation, deduplication via
+  source_ref, fuzzy person matching, semantic project linking.
+  CalendarWorker polls every 15 minutes. Suppression windows for gym
+  and sleep. Date trigger for initial sync avoids event loop conflict.
+- GitHub: Fine-grained PAT for Presence repo (Contents+Metadata read).
+  GitHubService with commit polling, diff fetching, stale node marking.
+  GitHubWorker polls every 30 minutes. github_state SQLite table for
+  SHA persistence. Presence repo confirmed public.
+- Presence codebase first analysis: CodebaseAnalysisService reads full
+  repo tree, fetches key files, sends to LLM with structured prompt.
+  10 finding nodes created (4 challenge, 3 improvement, 3 insight).
+  48h cooldown. JSON array extraction resilient to LLM formatting noise.
+  Findings dripped 2 per day via DripService in morning briefing.
+- Gmail: Send-only via gmail.send OAuth scope. GmailService with plain
+  text, HTML, and attachment support. Convenience methods for brain
+  export, weekly summary, and analysis findings delivery. Always sends
+  maihera.ai → yashpulsay@gmail.com. Never reads inbox.
+
+**Block C — Intelligence**
+- Signal defaults centralized in signal_defaults.py. All integrations
+  use get_defaults(source) instead of hardcoding. node_weight encodes
+  epistemological confidence (1.0 human, 0.8 analysis, 0.7 system).
+  calendar_attention() and analysis_importance() as shared utilities.
+- Analysis drip system: DripService tracks surfaced node IDs in SQLite.
+  2 findings per day, importance-descending order. Drip state resets
+  after new analysis pass. Integrated into morning briefing as Segment 2.
+
+**Block D — Daily Features**
+- Daily standup: StandupService with 3-question flow. Answers processed
+  via LLM to extract discrete items. Yesterday answers mark tasks
+  complete. Today answers spike attention or create new task nodes.
+  Blocker answers create blocker nodes. Skips Sunday. WebSocket routing
+  detects standup state and routes chat answers to standup processor.
+- Weekly review: WeeklyReviewService runs Sunday only. LLM generates
+  prose summary from brain context (completed, stalled, resistant,
+  high-signal nodes). Delivered by voice in segments. Summary emailed
+  to Yash via Gmail. Replaces standup on Sunday.
+
+**Block E — Tests and wrap**
+- 25 integration tests, all passing. Covers all Phase 3 services.
+
+**Key decisions made during Phase 3:**
+- Gemini Pro dropped from router — free tier unreliable (0-25 req/day).
+  Replaced with Gemini 2.5 Flash (primary) + 2.0 Flash Lite (overflow).
+- GitHub write scope not needed in Phase 3 — brain graph is the
+  tracking system. Write token deferred to Phase 4 (commits to branch).
+- Calendar Model A confirmed — MAIHERA's Google account IS the calendar.
+  No delegation needed. OAuth is straightforward installed app flow.
+- Worker initial sync uses APScheduler date trigger (T+5s, T+10s)
+  instead of direct call — avoids asyncio event loop conflict with
+  uvicorn during lifespan init.
+- Presence repo is public — fine-grained PAT still used for
+  authenticated access (avoids GitHub rate limits on unauthenticated).
+- Gmail scoped to gmail.send only — no inbox read. Narrowest possible
+  OAuth scope for the actual use case.
+- Analysis JSON extraction uses find('[') / rfind(']') — resilient to
+  LLM adding text before or after the array.
+- Standup skips Sunday. Weekly review skips all non-Sundays.
+  Both checked in nudge_service morning briefing flow.
+
+**Known issues:**
+- Gemini 2.0 Flash Lite returns 429 in rapid succession tests due to
+  shared AI Studio project RPM quota. Self-resolves in 60s. Router
+  cascades correctly in production.
+- ChromaDB posthog telemetry error on startup (capture() signature
+  mismatch) — cosmetic only, does not affect functionality.
+- Whisper installed but ffmpeg not confirmed on PATH — voice input
+  may fail silently. Deferred to Phase 5.
+- Workspace context pill in TopBar still empty — session detection
+  logic not yet built. Deferred to Phase 4.
+
+**New files created:**
+- backend/brain/migrate_phase3.py
+- backend/brain/signal_defaults.py
+- backend/services/google_auth_service.py
+- backend/services/calendar_service.py
+- backend/services/github_service.py
+- backend/services/codebase_analysis_service.py
+- backend/services/gmail_service.py
+- backend/services/drip_service.py
+- backend/services/standup_service.py
+- backend/services/weekly_review_service.py
+- backend/workers/calendar_worker.py
+- backend/workers/github_worker.py
+- backend/api/routes/calendar.py
+- backend/api/routes/analysis.py
+- backend/api/routes/gmail.py
+- backend/tests/test_phase3.py
+
+**Next phase:** Phase 4 — MAIHERA Executes
+
+---
+
 
 
 ---
