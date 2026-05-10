@@ -313,6 +313,141 @@ class CalendarService:
                 parts.append(f"Start: {start_dt.strftime('%Y-%m-%d %H:%M')}")
 
         return " | ".join(parts) if parts else "No description"
+    
+    async def get_upcoming_events(self, days: int = 7) -> list:
+        """Fetch upcoming calendar events for the next N days."""
+        from datetime import datetime, timezone, timedelta
+        import asyncio
+        now = datetime.now(timezone.utc)
+        end = now + timedelta(days=days)
+        loop = asyncio.get_event_loop()
+        events = await loop.run_in_executor(
+            None,
+            lambda: self._fetch_events_sync(now, end)
+        )
+        return events
+
+    def _fetch_events_sync(self, start, end) -> list:
+        """Synchronous event fetch — runs in executor."""
+        try:
+            from services.google_auth_service import GoogleAuthService
+            from googleapiclient.discovery import build
+            auth = GoogleAuthService()
+            creds = auth.get_credentials()
+            service = build("calendar", "v3", credentials=creds)
+            result = service.events().list(
+                calendarId="primary",
+                timeMin=start.isoformat(),
+                timeMax=end.isoformat(),
+                singleEvents=True,
+                orderBy="startTime",
+                maxResults=20,
+            ).execute()
+            return result.get("items", [])
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(
+                "get_upcoming_events error: %s", e
+            )
+            return []
+
+    async def get_event(self, event_id: str) -> dict | None:
+        """Re-fetch a single event by ID — used by verification."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self._get_event_sync(event_id)
+        )
+
+    def _get_event_sync(self, event_id: str) -> dict | None:
+        try:
+            from services.google_auth_service import GoogleAuthService
+            from googleapiclient.discovery import build
+            auth = GoogleAuthService()
+            creds = auth.get_credentials()
+            service = build("calendar", "v3", credentials=creds)
+            return service.events().get(
+                calendarId="primary",
+                eventId=event_id
+            ).execute()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(
+                "_get_event_sync error: %s", e
+            )
+            return None
+
+    async def create_event(
+        self,
+        title: str,
+        start: str,
+        end: str,
+        description: str = "",
+        attendees: list = [],
+    ) -> str:
+        """Create a calendar event. Returns event ID."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self._create_event_sync(
+                title, start, end, description, attendees
+            )
+        )
+
+    def _create_event_sync(
+        self, title, start, end, description, attendees
+    ) -> str:
+        try:
+            from services.google_auth_service import GoogleAuthService
+            from googleapiclient.discovery import build
+            auth = GoogleAuthService()
+            creds = auth.get_credentials()
+            service = build("calendar", "v3", credentials=creds)
+            body = {
+                "summary": title,
+                "description": description,
+                "start": {"dateTime": start, "timeZone": "Asia/Kolkata"},
+                "end":   {"dateTime": end,   "timeZone": "Asia/Kolkata"},
+                "attendees": [{"email": a} for a in attendees],
+            }
+            event = service.events().insert(
+                calendarId="primary", body=body
+            ).execute()
+            return event["id"]
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(
+                "_create_event_sync error: %s", e
+            )
+            raise
+
+    async def delete_event(self, event_id: str) -> None:
+        """Delete an event — used by CalendarWriter rollback."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: self._delete_event_sync(event_id)
+        )
+
+    def _delete_event_sync(self, event_id: str) -> None:
+        try:
+            from services.google_auth_service import GoogleAuthService
+            from googleapiclient.discovery import build
+            auth = GoogleAuthService()
+            creds = auth.get_credentials()
+            service = build("calendar", "v3", credentials=creds)
+            service.events().delete(
+                calendarId="primary",
+                eventId=event_id
+            ).execute()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(
+                "_delete_event_sync error: %s", e
+            )
 
 
 # Module-level singleton

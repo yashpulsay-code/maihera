@@ -278,6 +278,59 @@ class GitHubService:
         except Exception as e:
             logger.error("GitHubService: could not store SHA: %s", e)   
 
+    async def create_issue(
+        self,
+        title: str,
+        body: str = "",
+        labels: list = [],
+        repo: str = "Presence",
+    ) -> int:
+        """Create a GitHub issue. Returns issue number."""
+        import httpx
+        from services.secrets_service import SecretsService
+        secrets = SecretsService()
+        token = secrets.get("GITHUB_TOKEN")
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        }
+        owner = "yashpulsay-code"
+        url = f"https://api.github.com/repos/{owner}/{repo}/issues"
+        payload = {"title": title, "body": body}
+        if labels:
+            payload["labels"] = labels
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            return resp.json()["number"]
+
+    async def get_issue(
+        self, issue_number: int, repo: str = "Presence"
+    ) -> dict | None:
+        """Re-fetch an issue by number — used by verification."""
+        import httpx
+        from services.secrets_service import SecretsService
+        secrets = SecretsService()
+        token = secrets.get("GITHUB_TOKEN")
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        }
+        owner = "yashpulsay-code"
+        url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}"
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 404:
+                    return None
+                resp.raise_for_status()
+                return resp.json()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(
+                "get_issue error: %s", e
+            )
+            return None
 
 # Module-level singleton
 github_service = GitHubService()
