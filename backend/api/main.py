@@ -39,6 +39,8 @@ _github_service = None
 _github_worker  = None
 _standup_active: bool = False
 _standup_question_index: int = 0
+_orchestrator = None
+_confirmation_broker = None
 
 async def _handle_ws_chat(
     text: str,
@@ -46,10 +48,20 @@ async def _handle_ws_chat(
     brain_service,
     llm_router,
     ws_manager,
-    voice_service
+    voice_service,
+    confirmation_broker=None,
 ) -> None:
     """Handle a chat message received via WebSocket."""
     global _standup_active, _standup_question_index
+
+    # ── Confirmation routing — checked before everything else ─────
+    if _confirmation_broker:
+        consumed = await _confirmation_broker.resolve(
+            text=text, resolved_by="text"
+        )
+        if consumed:
+            await ws_manager.send_system_status("watching")
+            return
 
     try:
         await ws_manager.send_system_status("thinking")
@@ -213,19 +225,34 @@ async def lifespan(app: FastAPI):
     try:
         from api.websocket_manager import WebSocketManager
         _ws_manager = WebSocketManager()
-        logger.info("[1/12] WebSocket manager ready.")
+        logger.info("[1/14] WebSocket manager ready.")
 
         from brain.brain_service import get_brain_service
         _brain_service, _neo4j_driver = get_brain_service()
-        logger.info("[2/12] Brain service ready.")
+        logger.info("[2/14] Brain service ready.")
 
         from llm.router import LLMRouter
         _llm_router = LLMRouter()
-        logger.info("[3/12] LLM router ready.")
+        logger.info("[3/14] LLM router ready.")
 
         from brain.classifier import NodeClassifier
         _classifier = NodeClassifier(llm_router=_llm_router)
-        logger.info("[4/12] Node classifier ready.")
+        logger.info("[4/14] Node classifier ready.")
+
+        from orchestrator.confirmation_broker import ConfirmationBroker
+        _confirmation_broker = ConfirmationBroker(db=_brain_service.db)
+        _confirmation_broker.set_ws_manager(_ws_manager)
+        logger.info("[5/14] ConfirmationBroker ready.")
+
+        from orchestrator.orchestrator import Orchestrator
+        from orchestrator.tool_registry import register_all_tools
+        _orchestrator = Orchestrator(
+            db=_brain_service.db,
+            confirmation_broker=_confirmation_broker,
+        )
+        _orchestrator.set_ws_manager(_ws_manager)
+        register_all_tools(_orchestrator)
+        logger.info("[6/14] Orchestrator ready — 13 tools registered.")
 
         from api.routes import brain as brain_routes
         from api.routes import chat as chat_routes
@@ -236,18 +263,20 @@ async def lifespan(app: FastAPI):
         chat_routes.set_dependencies(_brain_service, _llm_router, _classifier)
         app.include_router(voice_router)
         app.include_router(briefing_router)                         
-        logger.info("[5/12] Route dependencies injected.")
+        logger.info("[7/14] Route dependencies injected.")
 
         from workers.decay_worker import DecayWorker
         _decay_worker = DecayWorker(_brain_service)
         _decay_worker.start()
-        logger.info("[6/12] Decay worker started.")
+        logger.info("[8/14] Decay worker started.")
         
         from services.voice_service import VoiceService
         _voice_service = VoiceService()
         _voice_service.set_ws_manager(_ws_manager)
         _voice_service.start()
-        logger.info("[7/12] Voice service started.")
+        logger.info("[9/14] Voice service started.")
+        _confirmation_broker.set_voice_service(_voice_service)
+        _orchestrator.set_voice_service(_voice_service)
 
         from services.nudge_service import NudgeService
         _nudge_service = NudgeService(
@@ -259,7 +288,18 @@ async def lifespan(app: FastAPI):
         _nudge_service.set_llm_router(_llm_router)
         _decay_worker.add_nudge_job(_nudge_service)
         briefing_routes.set_dependencies(_nudge_service)
-        logger.info("[8/12] Nudge service ready.")
+        logger.info("[10/14] Nudge service ready.")
+
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        _confirmation_broker_scheduler = AsyncIOScheduler()
+        _confirmation_broker_scheduler.add_job(
+            _confirmation_broker.expire_stale,
+            trigger="interval",
+            minutes=2,
+            id="confirmation_expiry",
+        )
+        _confirmation_broker_scheduler.start()
+        logger.info("Confirmation expiry scheduler started.")
 
         from services.calendar_service import CalendarService
         from workers.calendar_worker import CalendarWorker
@@ -270,26 +310,26 @@ async def lifespan(app: FastAPI):
         _calendar_worker.start() 
         calendar_routes.set_dependencies(_calendar_service, _brain_service)
         app.include_router(calendar_router)
-        logger.info("[9/12] Calendar service ready.")
+        logger.info("[11/14] Calendar service ready.")
 
         from services.github_service import GitHubService
         from workers.github_worker import GitHubWorker
         _github_service = GitHubService()
         _github_worker  = GitHubWorker(_github_service, _brain_service)
         _github_worker.start()
-        logger.info("[10/12] GitHub service ready.")
+        logger.info("[12/14] GitHub service ready.")
 
         from api.routes.analysis import router as analysis_router
         from api.routes import analysis as analysis_routes
         analysis_routes.set_dependencies(_brain_service, _llm_router)
         app.include_router(analysis_router)
-        logger.info("[11/12] Analysis routes ready.")
+        logger.info("[13/14] Analysis routes ready.")
 
         from api.routes.gmail import router as gmail_router
         from api.routes import gmail as gmail_routes
         gmail_routes.set_dependencies(_brain_service)
         app.include_router(gmail_router)
-        logger.info("[12/12] Gmail service ready.")
+        logger.info("[14/14] Gmail service ready.")
 
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")
@@ -314,6 +354,7 @@ async def lifespan(app: FastAPI):
         if _neo4j_driver:
             _neo4j_driver.close()
             logger.info("Neo4j driver closed.")
+        _confirmation_broker_scheduler.shutdown()
         logger.info("MAIHERA shutdown complete.")
 
 
@@ -387,12 +428,13 @@ async def websocket_brain(websocket: WebSocket):
                     logger.info("chat via WS: %.60s", text)
                     if _brain_service and _llm_router:
                         asyncio.create_task(
-                            _handle_ws_chat(
-                                text, context_node_id,
-                                _brain_service, _llm_router,
-                                _ws_manager, _voice_service
-                            )
+                        _handle_ws_chat(
+                            text, context_node_id,
+                            _brain_service, _llm_router,
+                            _ws_manager, _voice_service,
+                            confirmation_broker=_confirmation_broker,
                         )
+                    )
 
                 elif msg_type == "energy_checkin":
                     level = payload.get("level")
