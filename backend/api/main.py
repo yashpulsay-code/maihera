@@ -37,6 +37,8 @@ _calendar_service = None
 _calendar_worker  = None
 _github_service = None
 _github_worker  = None
+_standup_active: bool = False
+_standup_question_index: int = 0
 
 async def _handle_ws_chat(
     text: str,
@@ -47,17 +49,103 @@ async def _handle_ws_chat(
     voice_service
 ) -> None:
     """Handle a chat message received via WebSocket."""
+    global _standup_active, _standup_question_index
+
     try:
         await ws_manager.send_system_status("thinking")
 
+        # ── Standup routing ───────────────────────────────────────
+        from services.standup_service import standup_service
+
+        if _standup_active:
+            # Process this message as a standup answer
+            result = await standup_service.process_answer(
+                brain_service=brain_service,
+                llm_router=llm_router,
+                question_index=_standup_question_index,
+                answer=text
+            )
+            logger.info(
+                "Standup Q%d processed: %s",
+                _standup_question_index, result.get('summary', '')
+            )
+
+            # Get next question
+            next_q = standup_service.get_next_question(
+                brain_service, _standup_question_index
+            )
+            _standup_question_index += 1
+
+            if next_q:
+                # Ask next question
+                await voice_service.enqueue_speech(
+                    text=next_q,
+                    node_ids=[],
+                    priority="normal"
+                )
+                await ws_manager.send_maihera_speak(
+                    text=next_q,
+                    node_ids=[],
+                    priority="normal"
+                )
+            else:
+                # Standup complete
+                _standup_active = False
+                _standup_question_index = 0
+                standup_service.mark_complete(brain_service)
+                closing = (
+                    "Got it Boss. Standup done. "
+                    "I'll flag anything that needs attention as the day develops."
+                )
+                await voice_service.enqueue_speech(
+                    text=closing,
+                    node_ids=[],
+                    priority="normal"
+                )
+                await ws_manager.send_maihera_speak(
+                    text=closing,
+                    node_ids=[],
+                    priority="normal"
+                )
+
+            await ws_manager.send_system_status("watching")
+            return
+
+        # ── Normal chat routing ───────────────────────────────────
+
+        # Check if this message is triggering standup start
+        # (only if standup should run today and hasn't started yet)
+        trigger_words = ['standup', 'stand up', 'check in', 'daily']
+        if (
+            any(w in text.lower() for w in trigger_words)
+            and standup_service.should_run_today(brain_service)
+        ):
+            _standup_active = True
+            _standup_question_index = 0
+            first_q = standup_service.get_first_question()
+            await voice_service.enqueue_speech(
+                text=first_q,
+                node_ids=[],
+                priority="normal"
+            )
+            await ws_manager.send_maihera_speak(
+                text=first_q,
+                node_ids=[],
+                priority="normal"
+            )
+            await ws_manager.send_system_status("watching")
+            return
+
+        # Standard conversation
         from llm.persona import build_system_prompt
 
         self_node = None
         active_projects = []
-        high_signal_nodes = []
 
         projects = brain_service.list_nodes(node_type='project')
-        active_projects = [p for p in projects if p.get('status') == 'active']
+        active_projects = [
+            p for p in projects if p.get('status') == 'active'
+        ]
 
         all_persons = brain_service.list_nodes(node_type='person')
         for p in all_persons:
@@ -70,7 +158,6 @@ async def _handle_ws_chat(
             attention_threshold=0.2
         )
 
-        # If a node was clicked before asking, inject its context
         extra_context = ""
         if context_node_id:
             node = brain_service.get_node(context_node_id)
@@ -97,8 +184,7 @@ async def _handle_ws_chat(
 
         if not response_text:
             return
-        
-        # Speak the response
+
         if voice_service:
             await voice_service.enqueue_speech(
                 text=response_text,
@@ -286,6 +372,12 @@ async def websocket_brain(websocket: WebSocket):
                         asyncio.create_task(
                             _nudge_service.trigger_morning_briefing()
                         )
+                    # Activate standup state if applicable
+                    from services.standup_service import standup_service
+                    if standup_service.should_run_today(_brain_service):
+                        global _standup_active, _standup_question_index
+                        _standup_active = True
+                        _standup_question_index = 0
 
                 elif msg_type == "chat":
                     text = payload.get("text", "").strip()

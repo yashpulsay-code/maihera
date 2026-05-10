@@ -396,6 +396,25 @@ class NudgeService:
             len(segments)
         )
 
+        # Initiate standup after briefing if applicable
+        from services.standup_service import standup_service
+        if standup_service.should_run_today(self._brain):
+            import asyncio
+            await asyncio.sleep(1)  # brief pause after briefing
+            first_question = standup_service.get_first_question()
+            await self._voice.enqueue_speech(
+                text=first_question,
+                node_ids=[],
+                priority="normal"
+            )
+            if self._ws_manager:
+                await self._ws_manager.send_maihera_speak(
+                    text=first_question,
+                    node_ids=[],
+                    priority="normal"
+                )
+            logger.info("NudgeService: standup initiated.")
+
     async def _build_briefing_segments(self) -> list[dict]:
         """Build the ordered list of briefing segments."""
         segments = []
