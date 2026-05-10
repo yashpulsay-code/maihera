@@ -78,6 +78,27 @@ export interface SystemStatusPayload {
   status: 'watching' | 'thinking' | 'speaking' | 'dream'
 }
 
+// ── Confirmation Messages ──────────────────────────────────────
+
+export interface ConfirmationRequestedPayload {
+  confirmation_id: string
+  task_id: string
+  action_summary: string
+  full_detail: Record<string, unknown>
+  expires_at: string
+}
+
+export interface ConfirmationResolvedPayload {
+  confirmation_id: string
+  resolved_by: 'voice' | 'text' | 'auto' | 'timeout'
+  action_summary: string
+}
+
+export interface ConfirmationExpiredPayload {
+  confirmation_id: string
+  action_summary: string
+}
+
 // ── Union Type ─────────────────────────────────────────────────
 
 export type AnyWSMessage =
@@ -93,10 +114,13 @@ export type AnyWSMessage =
   | WSMessage<FocusModeChangePayload>
   | WSMessage<NudgeQueueUpdatePayload>
   | WSMessage<SystemStatusPayload>
+  | WSMessage<ConfirmationRequestedPayload>
+  | WSMessage<ConfirmationResolvedPayload>
+  | WSMessage<ConfirmationExpiredPayload>
 
 // ── Inbound (frontend → backend) ──────────────────────────────
 
 export interface OutboundMessage {
-  type: 'session_start' | 'chat' | 'energy_checkin' | 'focus_mode' | 'speech_next'
+  type: 'session_start' | 'chat' | 'energy_checkin' | 'focus_mode' | 'speech_next' | 'confirm' | 'cancel_confirmation'
   payload: Record<string, unknown>
 }
