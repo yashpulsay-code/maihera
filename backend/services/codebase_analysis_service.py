@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from brain.schema import NodeSchema, NodeType, NodeSource, NodeStatus, NodeVisibility
 from llm.router import LLMRouter
 from services.github_service import github_service
+from brain.signal_defaults import get_defaults, analysis_importance
 
 logger = logging.getLogger(__name__)
 
@@ -280,21 +281,23 @@ Priority 1 = most important architectural concern. Priority 10 = lowest."""
                 node_status = NodeStatus.ACTIVE
 
             priority = finding["priority"]
-            importance = 0.8 - ((priority - 1) * (0.4 / 9))
+            importance = analysis_importance(priority)
+
+            defaults = get_defaults(NodeSource.DREAM)
 
             node = NodeSchema(
-                type=node_type,
-                label=finding["label"][:60],
-                description=finding["description"],
-                project_id=presence_project_id,
-                source=NodeSource.DREAM,
-                status=node_status,
-                visibility=NodeVisibility.PRIVATE,
-                source_ref="github:yashpulsay-code/Presence",
-                node_weight=0.8,
-                importance=importance,
-                attention=0.7,
-                evidence=finding["evidence"]
+                type        = node_type,
+                label       = finding["label"][:60],
+                description = finding["description"],
+                project_id  = presence_project_id,
+                source      = NodeSource.DREAM,
+                status      = node_status,
+                visibility  = NodeVisibility.PRIVATE,
+                source_ref  = "github:yashpulsay-code/Presence",
+                node_weight = defaults['node_weight'],
+                importance  = importance,
+                attention   = defaults['attention'],
+                evidence    = finding["evidence"]
             )
 
             try:

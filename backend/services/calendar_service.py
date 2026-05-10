@@ -24,15 +24,9 @@ except ImportError:
 from brain.schema import NodeSchema, NodeType, NodeSource, NodeStatus, WorkspaceType
 from services.google_auth_service import google_auth
 from services.secrets_service import secrets
+from brain.signal_defaults import get_defaults, calendar_attention
 
 logger = logging.getLogger(__name__)
-
-# Signal initialization defaults
-DEFAULT_IMPORTANCE = 0.4
-DEFAULT_NODE_WEIGHT = 0.7
-DEFAULT_SOURCE = NodeSource.CALENDAR
-DEFAULT_WORKSPACE = WorkspaceType.PERSONAL
-
 
 class CalendarService:
     """Service for syncing Google Calendar events to the brain graph."""
@@ -119,9 +113,23 @@ class CalendarService:
         """Build a NodeSchema from a Google Calendar event."""
         label       = event.get('summary', 'Untitled Event')
         description = self._extract_event_description(event)
-        attention   = self._compute_attention(event)
         start       = event.get('start', {})
         start_dt    = self._parse_datetime(start)
+
+        # Compute attention from proximity
+        if start_dt:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            # Make start_dt timezone-aware if naive
+            if start_dt.tzinfo is None:
+                from datetime import timezone
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+            hours_until = (start_dt - now).total_seconds() / 3600
+            attention = calendar_attention(hours_until)
+        else:
+            attention = 0.6
+
+        defaults = get_defaults(NodeSource.CALENDAR)
 
         return NodeSchema(
             type        = NodeType.EVENT,
@@ -129,9 +137,9 @@ class CalendarService:
             description = description,
             source      = NodeSource.CALENDAR,
             source_ref  = source_ref,
-            importance  = DEFAULT_IMPORTANCE,
+            importance  = defaults['importance'],
             attention   = attention,
-            node_weight = DEFAULT_NODE_WEIGHT,
+            node_weight = defaults['node_weight'],
             workspace   = WorkspaceType.PERSONAL,
             status      = NodeStatus.ACTIVE,
             evidence    = [],
@@ -242,24 +250,15 @@ class CalendarService:
 
     def _compute_attention(self, event: dict) -> float:
         """Compute attention signal based on proximity to now."""
-        start = self._parse_datetime(event['start'])
+        start = self._parse_datetime(event.get('start', {}))
         if not start:
             return 0.4
-
-        now = datetime.utcnow()
-        delta = start - now
-        hours_until = delta.total_seconds() / 3600
-
-        if hours_until <= 0:
-            return 1.0  # Event is happening now or in the past
-        elif hours_until <= 24:
-            return 1.0  # Today
-        elif hours_until <= 72:
-            return 0.8  # Within 3 days
-        elif hours_until <= 168:
-            return 0.6  # Within 7 days
-        else:
-            return 0.4  # Further out
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        hours_until = (start - now).total_seconds() / 3600
+        return calendar_attention(hours_until)
 
     def _parse_datetime(self, time_dict: dict) -> Optional[datetime]:
         """Parse datetime from Google Calendar time dictionary."""
