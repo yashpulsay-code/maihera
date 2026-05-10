@@ -99,3 +99,30 @@ async def get_presence_analysis_status():
         "cooldown_active": not cooldown_ok,
         "nodes_created": node_count
     }
+
+@router.get("/presence/drip-status")
+async def get_drip_status():
+    """Return current drip state — how many findings surfaced vs remaining."""
+    if not _brain_service:
+        raise HTTPException(
+            status_code=503,
+            detail="Brain service not initialized"
+        )
+    from services.drip_service import drip_service
+    return drip_service.get_drip_status(_brain_service)
+
+
+@router.post("/presence/drip-reset")
+async def reset_drip():
+    """
+    Reset drip state — all findings become unsurfaced.
+    Use after a new analysis pass generates fresh findings.
+    """
+    if not _brain_service:
+        raise HTTPException(
+            status_code=503,
+            detail="Brain service not initialized"
+        )
+    from services.drip_service import drip_service
+    drip_service.reset(_brain_service)
+    return {"status": "reset", "message": "All findings marked unsurfaced."}

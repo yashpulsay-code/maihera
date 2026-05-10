@@ -497,6 +497,23 @@ class DatabaseManager:
         """, (date_key,))
         row = cursor.fetchone()
         return row[0] > 0
+    
+    def get_drip_state(self, key: str) -> str | None:
+        """Read a drip state value from github_state table."""
+        cursor = self.connection.execute(
+            "SELECT value FROM github_state WHERE key = ?", (key,)
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def set_drip_state(self, key: str, value: str) -> None:
+        """Write a drip state value to github_state table."""
+        self.connection.execute("""
+            INSERT INTO github_state (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """, (key, value))
+        self.connection.commit()
 
     # ── Stats ─────────────────────────────────────────────────────
 

@@ -419,7 +419,7 @@ class NudgeService:
 
             if high_signal:
                 node_ids = [n["id"] for n in high_signal]
-                labels = [n["label"] for n in high_signal]
+                labels   = [n["label"] for n in high_signal]
 
                 if len(labels) == 1:
                     node_text = f"'{labels[0]}'"
@@ -436,21 +436,41 @@ class NudgeService:
                     f"I'll surface more context as the day develops."
                 )
                 segments.append({
-                    "text": signal_text,
+                    "text":     signal_text,
                     "node_ids": node_ids
                 })
             else:
                 segments.append({
-                    "text": "Your brain graph is quiet this morning. Good time to load something new.",
+                    "text":     "Your brain graph is quiet this morning. Good time to load something new.",
                     "node_ids": []
                 })
 
         except Exception as e:
             logger.warning("Briefing: failed to get high signal nodes: %s", e)
 
-        # Segment 2 — Energy check-in (always last)
+        # Segment 2 — Presence analysis drip
+        try:
+            from services.drip_service import drip_service
+            todays_findings = drip_service.get_todays_findings(self._brain)
+
+            for finding in todays_findings:
+                drip_text = drip_service.format_finding_for_briefing(finding)
+                segments.append({
+                    "text":     drip_text,
+                    "node_ids": [finding["id"]]
+                })
+
+            if todays_findings:
+                logger.info(
+                    "Briefing: dripped %d finding(s).",
+                    len(todays_findings)
+                )
+        except Exception as e:
+            logger.warning("Briefing: drip service failed: %s", e)
+
+        # Segment 3 — Energy check-in (always last)
         segments.append({
-            "text": "Before we begin — energy level today, Boss? One to ten.",
+            "text":     "Before we begin — energy level today, Boss? One to ten.",
             "node_ids": []
         })
 
