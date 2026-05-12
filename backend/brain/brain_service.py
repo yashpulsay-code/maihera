@@ -141,6 +141,29 @@ class BrainService:
 
         logger.debug("Updated node %s with %s", node_id,
                      list(updates.keys()))
+        
+    def update_node_status(self, node_id: str, status: str) -> None:
+        """
+        Update the status field on a node.
+        Convenience wrapper over update_node.
+        Used by ContextCaptureService for staging lifecycle.
+        """
+        self.update_node(node_id, {"status": status})
+        logger.debug("Node %s status → %s", node_id, status)
+
+    def update_node_description(
+        self, node_id: str, description: str
+    ) -> None:
+        """
+        Update the description field on a node.
+        Re-embeds in ChromaDB automatically via update_node.
+        Used by ContextCaptureService merge operation.
+        """
+        self.update_node(node_id, {"description": description})
+        logger.debug(
+            "Node %s description updated (%d chars)",
+            node_id, len(description)
+        )
 
     def update_signal(
         self,
