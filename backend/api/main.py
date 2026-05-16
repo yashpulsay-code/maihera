@@ -46,6 +46,9 @@ _gmail_reader_worker = None
 _system_observer = None
 _system_observer_worker = None
 _observer_event_queue = None
+_file_watcher = None
+_file_watcher_worker = None
+_file_watcher_queue = None
 
 async def _handle_ws_chat(
     text: str,
@@ -402,7 +405,26 @@ async def lifespan(app: FastAPI):
 
         # Expose observer worker to nudge service for context checks
         _nudge_service.set_observer_worker(_system_observer_worker)
-        logger.info("[21/21] Observer wired into nudge service.")
+        logger.info("[21/23] Observer wired into nudge service.")
+
+        _file_watcher_queue = _asyncio.Queue()
+
+        from services.file_watcher import FileWatcherService
+        _file_watcher = FileWatcherService(
+            event_queue=_file_watcher_queue,
+            loop=_asyncio.get_event_loop(),
+        )
+        _file_watcher.start()
+        logger.info("[22/23] File watcher started.")
+
+        from workers.file_watcher_worker import FileWatcherWorker
+        _file_watcher_worker = FileWatcherWorker(
+            event_queue=_file_watcher_queue,
+            brain_service=_brain_service,
+            observer_worker=_system_observer_worker,
+        )
+        _file_watcher_worker.start()
+        logger.info("[23/23] File watcher worker started.")
 
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")
@@ -433,6 +455,12 @@ async def lifespan(app: FastAPI):
         if _system_observer_worker:
             _system_observer_worker.stop()
             logger.info("System observer worker stopped.")
+        if _file_watcher:
+            _file_watcher.stop()
+            logger.info("File watcher stopped.")
+        if _file_watcher_worker:
+            _file_watcher_worker.stop()
+            logger.info("File watcher worker stopped.")
         if _neo4j_driver:
             _neo4j_driver.close()
             logger.info("Neo4j driver closed.")
