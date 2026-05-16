@@ -41,6 +41,8 @@ _standup_active: bool = False
 _standup_question_index: int = 0
 _orchestrator = None
 _confirmation_broker = None
+_gmail_reader_service = None
+_gmail_reader_worker = None
 
 async def _handle_ws_chat(
     text: str,
@@ -225,24 +227,24 @@ async def lifespan(app: FastAPI):
     try:
         from api.websocket_manager import WebSocketManager
         _ws_manager = WebSocketManager()
-        logger.info("[1/17] WebSocket manager ready.")
+        logger.info("[1/18] WebSocket manager ready.")
 
         from brain.brain_service import get_brain_service
         _brain_service, _neo4j_driver = get_brain_service()
-        logger.info("[2/17] Brain service ready.")
+        logger.info("[2/18] Brain service ready.")
 
         from llm.router import LLMRouter
         _llm_router = LLMRouter()
-        logger.info("[3/17] LLM router ready.")
+        logger.info("[3/18] LLM router ready.")
 
         from brain.classifier import NodeClassifier
         _classifier = NodeClassifier(llm_router=_llm_router)
-        logger.info("[4/17] Node classifier ready.")
+        logger.info("[4/18] Node classifier ready.")
 
         from orchestrator.confirmation_broker import ConfirmationBroker
         _confirmation_broker = ConfirmationBroker(db=_brain_service.db)
         _confirmation_broker.set_ws_manager(_ws_manager)
-        logger.info("[5/17] ConfirmationBroker ready.")
+        logger.info("[5/18] ConfirmationBroker ready.")
 
         from orchestrator.orchestrator import Orchestrator
         from orchestrator.tool_registry import register_all_tools
@@ -252,7 +254,7 @@ async def lifespan(app: FastAPI):
         )
         _orchestrator.set_ws_manager(_ws_manager)
         register_all_tools(_orchestrator)
-        logger.info("[6/17] Orchestrator ready — 13 tools registered.")
+        logger.info("[6/18] Orchestrator ready — 13 tools registered.")
 
         from api.routes import brain as brain_routes
         from api.routes import chat as chat_routes
@@ -263,18 +265,18 @@ async def lifespan(app: FastAPI):
         chat_routes.set_dependencies(_brain_service, _llm_router, _classifier)
         app.include_router(voice_router)
         app.include_router(briefing_router)                         
-        logger.info("[7/17] Route dependencies injected.")
+        logger.info("[7/18] Route dependencies injected.")
 
         from workers.decay_worker import DecayWorker
         _decay_worker = DecayWorker(_brain_service)
         _decay_worker.start()
-        logger.info("[8/17] Decay worker started.")
+        logger.info("[8/18] Decay worker started.")
         
         from services.voice_service import VoiceService
         _voice_service = VoiceService()
         _voice_service.set_ws_manager(_ws_manager)
         _voice_service.start()
-        logger.info("[9/17] Voice service started.")
+        logger.info("[9/18] Voice service started.")
         _confirmation_broker.set_voice_service(_voice_service)
         _orchestrator.set_voice_service(_voice_service)
 
@@ -288,7 +290,7 @@ async def lifespan(app: FastAPI):
         _nudge_service.set_llm_router(_llm_router)
         _decay_worker.add_nudge_job(_nudge_service)
         briefing_routes.set_dependencies(_nudge_service)
-        logger.info("[10/17] Nudge service ready.")
+        logger.info("[10/18] Nudge service ready.")
 
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         _confirmation_broker_scheduler = AsyncIOScheduler()
@@ -310,32 +312,32 @@ async def lifespan(app: FastAPI):
         _calendar_worker.start() 
         calendar_routes.set_dependencies(_calendar_service, _brain_service)
         app.include_router(calendar_router)
-        logger.info("[11/17] Calendar service ready.")
+        logger.info("[11/18] Calendar service ready.")
 
         from services.github_service import GitHubService
         from workers.github_worker import GitHubWorker
         _github_service = GitHubService()
         _github_worker  = GitHubWorker(_github_service, _brain_service)
         _github_worker.start()
-        logger.info("[12/17] GitHub service ready.")
+        logger.info("[12/18] GitHub service ready.")
 
         from api.routes.analysis import router as analysis_router
         from api.routes import analysis as analysis_routes
         analysis_routes.set_dependencies(_brain_service, _llm_router)
         app.include_router(analysis_router)
-        logger.info("[13/17] Analysis routes ready.")
+        logger.info("[13/18] Analysis routes ready.")
 
         from api.routes.orchestrator import router as orchestrator_router
         from api.routes import orchestrator as orchestrator_routes
         orchestrator_routes.set_dependencies(_orchestrator, _confirmation_broker)
         app.include_router(orchestrator_router)
-        logger.info("[14/17] Orchestrator routes ready.")
+        logger.info("[14/18] Orchestrator routes ready.")
 
         from api.routes.skills import router as skills_router
         from api.routes import skills as skills_routes
         skills_routes.set_dependencies(_orchestrator)
         app.include_router(skills_router)
-        logger.info("[15/17] Skills routes ready.")
+        logger.info("[15/18] Skills routes ready.")
 
         from services.context_capture_service import ContextCaptureService
         from api.routes.capture import router as capture_router
@@ -357,13 +359,26 @@ async def lifespan(app: FastAPI):
             id="capture_expiry",
             replace_existing=True,
         )
-        logger.info("[16/17] Context Capture service ready.")
+        logger.info("[16/18] Context Capture service ready.")
 
         from api.routes.gmail import router as gmail_router
         from api.routes import gmail as gmail_routes
         gmail_routes.set_dependencies(_brain_service)
         app.include_router(gmail_router)
-        logger.info("[17/17] Gmail service ready.")
+        logger.info("[17/18] Gmail send service ready.")
+
+        from services.gmail_reader_service import GmailReaderService
+        from workers.gmail_reader_worker import GmailReaderWorker
+        _gmail_reader_service = GmailReaderService(
+            brain_service=_brain_service,
+            llm_router=_llm_router,
+        )
+        _gmail_reader_service.ensure_read_state_table()
+        _gmail_reader_worker = GmailReaderWorker(_gmail_reader_service)
+        _gmail_reader_worker.set_ws_manager(_ws_manager)
+        _gmail_reader_worker.set_voice_service(_voice_service)
+        _gmail_reader_worker.start()
+        logger.info("[18/18] Gmail reader service ready.")
 
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")
@@ -385,6 +400,9 @@ async def lifespan(app: FastAPI):
         if _github_worker:
             _github_worker.stop()
             logger.info("GitHub worker stopped.")
+        if _gmail_reader_worker:
+            _gmail_reader_worker.stop()
+            logger.info("Gmail reader worker stopped.")
         if _neo4j_driver:
             _neo4j_driver.close()
             logger.info("Neo4j driver closed.")
