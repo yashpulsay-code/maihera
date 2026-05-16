@@ -50,6 +50,7 @@ class NudgeService:
         self._ws_manager = None
         self._llm_router = None
         self._current_status = "watching"
+        self._observer_worker = None
         logger.info("NudgeService initialized.")
 
     def set_ws_manager(self, ws_manager) -> None:
@@ -57,6 +58,10 @@ class NudgeService:
 
     def set_llm_router(self, llm_router) -> None:
         self._llm_router = llm_router
+
+    def set_observer_worker(self, observer_worker) -> None:
+        """Receives the SystemObserverWorker for context-aware nudging."""
+        self._observer_worker = observer_worker
 
     def set_status(self, status: str) -> None:
         """Called by other services to inform nudge engine of state."""
