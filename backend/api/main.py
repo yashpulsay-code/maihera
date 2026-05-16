@@ -51,6 +51,7 @@ _file_watcher_worker = None
 _file_watcher_queue = None
 _avoidance_detector = None
 _presence_health_worker = None
+_relationship_tracker = None
 
 async def _handle_ws_chat(
     text: str,
@@ -463,7 +464,22 @@ async def lifespan(app: FastAPI):
             _avoidance_detector,
         )
         app.include_router(observer_router)
-        logger.info("[26/26] Observer routes ready.")
+        logger.info("[26/27] Observer routes ready.")
+
+        from services.relationship_tracker import RelationshipTracker
+        _relationship_tracker = RelationshipTracker(
+            brain_service=_brain_service,
+            voice_service=_voice_service,
+        )
+        _relationship_tracker.set_ws_manager(_ws_manager)
+        _decay_worker.scheduler.add_job(
+            _relationship_tracker.evaluate_cold_contacts,
+            trigger="interval",
+            hours=6,
+            id="cold_contact_detection",
+            replace_existing=True,
+        )
+        logger.info("[27/27] Relationship tracker ready (6h schedule).")
 
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")
