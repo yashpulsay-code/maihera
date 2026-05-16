@@ -49,6 +49,7 @@ _observer_event_queue = None
 _file_watcher = None
 _file_watcher_worker = None
 _file_watcher_queue = None
+_avoidance_detector = None
 
 async def _handle_ws_chat(
     text: str,
@@ -424,7 +425,21 @@ async def lifespan(app: FastAPI):
             observer_worker=_system_observer_worker,
         )
         _file_watcher_worker.start()
-        logger.info("[23/23] File watcher worker started.")
+        logger.info("[23/24] File watcher worker started.")
+
+        from services.avoidance_detector import AvoidanceDetector
+        _avoidance_detector = AvoidanceDetector(
+            brain_service=_brain_service,
+            db_manager=_brain_service.db,
+        )
+        _decay_worker.scheduler.add_job(
+            _avoidance_detector.evaluate,
+            trigger="interval",
+            minutes=30,
+            id="avoidance_detection",
+            replace_existing=True,
+        )
+        logger.info("[24/24] Avoidance detector scheduled (30min).")
 
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")
