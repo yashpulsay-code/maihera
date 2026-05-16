@@ -1,0 +1,21 @@
+{
+  "_comment": "Edit this file to update app whitelist and watched folders. Changes apply within 60 seconds — no restart needed. Do not remove the _comment field.",
+  "app_whitelist": [
+    { "process": "Code.exe",            "context": "coding",  "label": "VS Code" },
+    { "process": "Cursor.exe",          "context": "coding",  "label": "Cursor" },
+    { "process": "Figma.exe",           "context": "design",  "label": "Figma" },
+    { "process": "Canva.exe",           "context": "design",  "label": "Canva" },
+    { "process": "WindowsTerminal.exe", "context": "coding",  "label": "Terminal" },
+    { "process": "chrome.exe",          "context": "browsing","label": "Chrome" },
+    { "process": "python.exe",          "context": "coding",  "label": "Python" },
+    { "process": "node.exe",            "context": "coding",  "label": "Node" },
+    { "process": "Postman.exe",         "context": "coding",  "label": "Postman" }
+  ],
+  "watched_folders": [
+    "C:\\Users\\HP\\OneDrive\\Desktop\\presence",
+    "C:\\Users\\HP\\maihera"
+  ],
+  "avoidance_threshold_hours": 48,
+  "cold_contact_days_frequent": 14,
+  "cold_contact_days_occasional": 45
+}
