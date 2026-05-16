@@ -2,11 +2,13 @@
 MAIHERA GitHub Worker
 Polls Presence repo every 30 minutes for new commits.
 Marks stale nodes. Queues re-analysis when logic files change.
+Triggers PresenceHealthWorker smoke test on new Presence pushes.
 """
 
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -34,17 +36,38 @@ def _is_suppressed() -> bool:
 class GitHubWorker:
 
     def __init__(self, github_service, brain_service):
-        self._github_service = github_service
-        self._brain_service  = brain_service
-        self._scheduler      = BackgroundScheduler(timezone='UTC')
-        self._poll_count     = 0
-        self._last_poll      = None
-        self._last_summary   = {}
+        self._github_service     = github_service
+        self._brain_service      = brain_service
+        self._scheduler          = BackgroundScheduler(timezone='UTC')
+        self._poll_count         = 0
+        self._last_poll          = None
+        self._last_summary       = {}
+
+        # Health worker — wired in after instantiation
+        self._health_worker      = None
+        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def set_health_worker(
+        self,
+        health_worker,
+        main_loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        """
+        Wire in the PresenceHealthWorker and the main event loop.
+        Must be called before start().
+        main_loop is the FastAPI asyncio event loop — required to
+        schedule health checks as coroutine tasks from this thread.
+        """
+        self._health_worker = health_worker
+        self._main_loop     = main_loop
+        logger.info("GitHubWorker: PresenceHealthWorker wired.")
 
     def _run_poll(self) -> None:
         """Scheduled poll job — runs in APScheduler background thread."""
         if _is_suppressed():
-            logger.debug("GitHubWorker: suppressed window — skipping poll.")
+            logger.debug(
+                "GitHubWorker: suppressed window — skipping poll."
+            )
             return
 
         async def _do_poll():
@@ -66,6 +89,10 @@ class GitHubWorker:
                         summary['stale_nodes'],
                         summary['needs_analysis'],
                     )
+
+                    # Trigger health check if Presence push detected
+                    self._maybe_trigger_health_check(summary)
+
                     if summary['needs_analysis']:
                         logger.info(
                             "GitHubWorker: re-analysis queued "
@@ -76,6 +103,7 @@ class GitHubWorker:
                         "GitHubWorker: poll #%d — no new commits.",
                         self._poll_count
                     )
+
             except Exception as e:
                 import traceback
                 logger.error(
@@ -89,9 +117,45 @@ class GitHubWorker:
         finally:
             loop.close()
 
+    def _maybe_trigger_health_check(self, summary: dict) -> None:
+        """
+        If new commits were detected and the health worker is wired,
+        schedule a smoke test on the main FastAPI event loop.
+        Thread-safe bridge from APScheduler thread → asyncio loop.
+        """
+        if not self._health_worker or not self._main_loop:
+            return
+
+        # Extract most recent commit info from summary
+        # GitHubService returns latest_sha and latest_message
+        # in the summary dict — use them if present
+        commit_sha     = summary.get("latest_sha", "unknown")
+        commit_message = summary.get("latest_message", "")
+
+        if commit_sha == "unknown":
+            logger.debug(
+                "GitHubWorker: no SHA in summary — "
+                "skipping health check trigger."
+            )
+            return
+
+        logger.info(
+            "GitHubWorker: triggering Presence health check "
+            "for push %s.", commit_sha[:8]
+        )
+
+        # Schedule the coroutine on the main event loop
+        # from this background thread
+        asyncio.run_coroutine_threadsafe(
+            self._health_worker.on_presence_push(
+                commit_sha=commit_sha,
+                commit_message=commit_message,
+            ),
+            self._main_loop,
+        )
+
     def start(self) -> None:
-        """Start the polling scheduler. No immediate poll — uses date trigger."""
-        # Recurring poll every 30 minutes
+        """Start the polling scheduler."""
         self._scheduler.add_job(
             self._run_poll,
             trigger='interval',
@@ -99,16 +163,17 @@ class GitHubWorker:
             id='github_poll',
             replace_existing=True,
         )
-        # Initial poll 10 seconds after startup via date trigger
         self._scheduler.add_job(
             self._run_poll,
             trigger='date',
             run_date=datetime.utcnow() + timedelta(seconds=10),
             id='github_initial_poll',
-            replace_existing=True
+            replace_existing=True,
         )
         self._scheduler.start()
-        logger.info("GitHubWorker: started — polling every 30 minutes.")
+        logger.info(
+            "GitHubWorker: started — polling every 30 minutes."
+        )
 
     def stop(self) -> None:
         if self._scheduler.running:

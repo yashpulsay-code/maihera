@@ -50,6 +50,7 @@ _file_watcher = None
 _file_watcher_worker = None
 _file_watcher_queue = None
 _avoidance_detector = None
+_presence_health_worker = None
 
 async def _handle_ws_chat(
     text: str,
@@ -323,10 +324,13 @@ async def lifespan(app: FastAPI):
 
         from services.github_service import GitHubService
         from workers.github_worker import GitHubWorker
+        from workers.presence_health_worker import PresenceHealthWorker
         _github_service = GitHubService()
         _github_worker  = GitHubWorker(_github_service, _brain_service)
-        _github_worker.start()
-        logger.info("[12/21] GitHub service ready.")
+        _presence_health_worker = PresenceHealthWorker(
+            brain_service=_brain_service,
+        )
+        logger.info("[12/24] GitHub service ready.")
 
         from api.routes.analysis import router as analysis_router
         from api.routes import analysis as analysis_routes
@@ -439,7 +443,27 @@ async def lifespan(app: FastAPI):
             id="avoidance_detection",
             replace_existing=True,
         )
-        logger.info("[24/24] Avoidance detector scheduled (30min).")
+        logger.info("[24/26] Avoidance detector scheduled (30min).")
+
+        # Wire health worker now that voice + ws are ready
+        _presence_health_worker.set_voice_service(_voice_service)
+        _presence_health_worker.set_ws_manager(_ws_manager)
+        _github_worker.set_health_worker(
+            _presence_health_worker,
+            asyncio.get_event_loop(),
+        )
+        _github_worker.start()
+        logger.info("[25/26] GitHub worker started with health monitor.")
+
+        from api.routes import observer as observer_routes
+        from api.routes.observer import router as observer_router
+        observer_routes.set_dependencies(
+            _system_observer,
+            _file_watcher,
+            _avoidance_detector,
+        )
+        app.include_router(observer_router)
+        logger.info("[26/26] Observer routes ready.")
 
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")
@@ -461,6 +485,8 @@ async def lifespan(app: FastAPI):
         if _github_worker:
             _github_worker.stop()
             logger.info("GitHub worker stopped.")
+        if _presence_health_worker:
+            logger.info("Presence health worker stopped.")
         if _gmail_reader_worker:
             _gmail_reader_worker.stop()
             logger.info("Gmail reader worker stopped.")

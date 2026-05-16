@@ -195,6 +195,14 @@ class GitHubService:
             new_commits = await self.get_commits_since(last_sha)
             summary['new_commits'] = len(new_commits)
 
+            # Add latest commit info for health worker trigger
+            summary['latest_sha'] = latest_sha
+            summary['latest_message'] = (
+                new_commits[0].get('commit', {})
+                .get('message', '')[:120]
+                if new_commits else ''
+            )
+
             logger.info(
                 "GitHubService: %d new commit(s) since %s.",
                 len(new_commits), last_sha[:8]
