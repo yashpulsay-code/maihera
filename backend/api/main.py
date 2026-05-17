@@ -53,6 +53,8 @@ _avoidance_detector = None
 _presence_health_worker = None
 _relationship_tracker = None
 _dream_event_queue = None
+_dream_mode_service = None
+_dream_mode_worker = None
 
 async def _handle_ws_chat(
     text: str,
@@ -486,6 +488,25 @@ async def lifespan(app: FastAPI):
         _system_observer_worker.set_dream_queue(_dream_event_queue)
         logger.info("[28/28] Dream Mode queue created and wired to observer worker.")
 
+        from services.secrets_service import SecretsService
+        _secrets = SecretsService()
+        _tavily_key = _secrets.get("MAIHERA_TAVILY_API_KEY")
+
+        from services.dream_mode_service import DreamModeService
+        from workers.dream_mode_worker import DreamModeWorker
+        _dream_mode_service = DreamModeService(
+            brain_service=_brain_service,
+            llm_router=_llm_router,
+        )
+        _dream_mode_service.set_tavily_key(_tavily_key)
+
+        _dream_mode_worker = DreamModeWorker(
+            dream_queue=_dream_event_queue,
+            dream_service=_dream_mode_service,
+        )
+        _dream_mode_worker.start()
+        logger.info("[29/29] Dream Mode service and worker started.")
+
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")
         logger.info("=" * 50)
@@ -523,6 +544,9 @@ async def lifespan(app: FastAPI):
         if _file_watcher_worker:
             _file_watcher_worker.stop()
             logger.info("File watcher worker stopped.")
+        if _dream_mode_worker:
+            _dream_mode_worker.stop()
+            logger.info("Dream Mode worker stopped.")
         if _neo4j_driver:
             _neo4j_driver.close()
             logger.info("Neo4j driver closed.")
