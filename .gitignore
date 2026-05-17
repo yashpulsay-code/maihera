@@ -53,3 +53,18 @@ build/
 
 # Backups
 backups/
+
+# Audio output files
+backend/audio_out/*.mp3
+backend/audio_out/*.wav
+
+# SQLite WAL files
+backend/*.db-shm
+backend/*.db-wal
+
+# Auth credentials
+backend/auth/credentials.json
+backend/auth/token*.json
+
+# Test scripts
+backend/test_*.py
