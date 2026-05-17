@@ -52,6 +52,7 @@ _file_watcher_queue = None
 _avoidance_detector = None
 _presence_health_worker = None
 _relationship_tracker = None
+_dream_event_queue = None
 
 async def _handle_ws_chat(
     text: str,
@@ -236,24 +237,24 @@ async def lifespan(app: FastAPI):
     try:
         from api.websocket_manager import WebSocketManager
         _ws_manager = WebSocketManager()
-        logger.info("[1/21] WebSocket manager ready.")
+        logger.info("[1/28] WebSocket manager ready.")
 
         from brain.brain_service import get_brain_service
         _brain_service, _neo4j_driver = get_brain_service()
-        logger.info("[2/21] Brain service ready.")
+        logger.info("[2/28] Brain service ready.")
 
         from llm.router import LLMRouter
         _llm_router = LLMRouter()
-        logger.info("[3/21] LLM router ready.")
+        logger.info("[3/28] LLM router ready.")
 
         from brain.classifier import NodeClassifier
         _classifier = NodeClassifier(llm_router=_llm_router)
-        logger.info("[4/21] Node classifier ready.")
+        logger.info("[4/28] Node classifier ready.")
 
         from orchestrator.confirmation_broker import ConfirmationBroker
         _confirmation_broker = ConfirmationBroker(db=_brain_service.db)
         _confirmation_broker.set_ws_manager(_ws_manager)
-        logger.info("[5/21] ConfirmationBroker ready.")
+        logger.info("[5/28] ConfirmationBroker ready.")
 
         from orchestrator.orchestrator import Orchestrator
         from orchestrator.tool_registry import register_all_tools
@@ -263,7 +264,7 @@ async def lifespan(app: FastAPI):
         )
         _orchestrator.set_ws_manager(_ws_manager)
         register_all_tools(_orchestrator)
-        logger.info("[6/21] Orchestrator ready — 13 tools registered.")
+        logger.info("[6/28] Orchestrator ready — 13 tools registered.")
 
         from api.routes import brain as brain_routes
         from api.routes import chat as chat_routes
@@ -274,18 +275,18 @@ async def lifespan(app: FastAPI):
         chat_routes.set_dependencies(_brain_service, _llm_router, _classifier)
         app.include_router(voice_router)
         app.include_router(briefing_router)                         
-        logger.info("[7/21] Route dependencies injected.")
+        logger.info("[7/28] Route dependencies injected.")
 
         from workers.decay_worker import DecayWorker
         _decay_worker = DecayWorker(_brain_service)
         _decay_worker.start()
-        logger.info("[8/21] Decay worker started.")
+        logger.info("[8/28] Decay worker started.")
         
         from services.voice_service import VoiceService
         _voice_service = VoiceService()
         _voice_service.set_ws_manager(_ws_manager)
         _voice_service.start()
-        logger.info("[9/21] Voice service started.")
+        logger.info("[9/28] Voice service started.")
         _confirmation_broker.set_voice_service(_voice_service)
         _orchestrator.set_voice_service(_voice_service)
 
@@ -299,7 +300,7 @@ async def lifespan(app: FastAPI):
         _nudge_service.set_llm_router(_llm_router)
         _decay_worker.add_nudge_job(_nudge_service)
         briefing_routes.set_dependencies(_nudge_service)
-        logger.info("[10/21] Nudge service ready.")
+        logger.info("[10/28] Nudge service ready.")
 
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         _confirmation_broker_scheduler = AsyncIOScheduler()
@@ -321,7 +322,7 @@ async def lifespan(app: FastAPI):
         _calendar_worker.start() 
         calendar_routes.set_dependencies(_calendar_service, _brain_service)
         app.include_router(calendar_router)
-        logger.info("[11/21] Calendar service ready.")
+        logger.info("[11/28] Calendar service ready.")
 
         from services.github_service import GitHubService
         from workers.github_worker import GitHubWorker
@@ -331,25 +332,25 @@ async def lifespan(app: FastAPI):
         _presence_health_worker = PresenceHealthWorker(
             brain_service=_brain_service,
         )
-        logger.info("[12/24] GitHub service ready.")
+        logger.info("[12/28] GitHub service ready.")
 
         from api.routes.analysis import router as analysis_router
         from api.routes import analysis as analysis_routes
         analysis_routes.set_dependencies(_brain_service, _llm_router)
         app.include_router(analysis_router)
-        logger.info("[13/21] Analysis routes ready.")
+        logger.info("[13/28] Analysis routes ready.")
 
         from api.routes.orchestrator import router as orchestrator_router
         from api.routes import orchestrator as orchestrator_routes
         orchestrator_routes.set_dependencies(_orchestrator, _confirmation_broker)
         app.include_router(orchestrator_router)
-        logger.info("[14/21] Orchestrator routes ready.")
+        logger.info("[14/28] Orchestrator routes ready.")
 
         from api.routes.skills import router as skills_router
         from api.routes import skills as skills_routes
         skills_routes.set_dependencies(_orchestrator)
         app.include_router(skills_router)
-        logger.info("[15/21] Skills routes ready.")
+        logger.info("[15/28] Skills routes ready.")
 
         from services.context_capture_service import ContextCaptureService
         from api.routes.capture import router as capture_router
@@ -371,13 +372,13 @@ async def lifespan(app: FastAPI):
             id="capture_expiry",
             replace_existing=True,
         )
-        logger.info("[16/21] Context Capture service ready.")
+        logger.info("[16/28] Context Capture service ready.")
 
         from api.routes.gmail import router as gmail_router
         from api.routes import gmail as gmail_routes
         gmail_routes.set_dependencies(_brain_service)
         app.include_router(gmail_router)
-        logger.info("[17/21] Gmail send service ready.")
+        logger.info("[17/28] Gmail send service ready.")
 
         from services.gmail_reader_service import GmailReaderService
         from workers.gmail_reader_worker import GmailReaderWorker
@@ -390,7 +391,7 @@ async def lifespan(app: FastAPI):
         _gmail_reader_worker.set_ws_manager(_ws_manager)
         _gmail_reader_worker.set_voice_service(_voice_service)
         _gmail_reader_worker.start()
-        logger.info("[18/21] Gmail reader service ready.")
+        logger.info("[18/28] Gmail reader service ready.")
 
         import asyncio as _asyncio
         _observer_event_queue = _asyncio.Queue()
@@ -399,7 +400,7 @@ async def lifespan(app: FastAPI):
         _system_observer = SystemObserverService(_observer_event_queue)
         _system_observer.set_event_loop(_asyncio.get_event_loop())
         _system_observer.start()
-        logger.info("[19/21] System observer started.")
+        logger.info("[19/28] System observer started.")
 
         from workers.system_observer_worker import SystemObserverWorker
         _system_observer_worker = SystemObserverWorker(
@@ -407,11 +408,11 @@ async def lifespan(app: FastAPI):
             brain_service=_brain_service,
         )
         _system_observer_worker.start()
-        logger.info("[20/21] System observer worker started.")
+        logger.info("[20/28] System observer worker started.")
 
         # Expose observer worker to nudge service for context checks
         _nudge_service.set_observer_worker(_system_observer_worker)
-        logger.info("[21/23] Observer wired into nudge service.")
+        logger.info("[21/28] Observer wired into nudge service.")
 
         _file_watcher_queue = _asyncio.Queue()
 
@@ -421,7 +422,7 @@ async def lifespan(app: FastAPI):
             loop=_asyncio.get_event_loop(),
         )
         _file_watcher.start()
-        logger.info("[22/23] File watcher started.")
+        logger.info("[22/28] File watcher started.")
 
         from workers.file_watcher_worker import FileWatcherWorker
         _file_watcher_worker = FileWatcherWorker(
@@ -430,7 +431,7 @@ async def lifespan(app: FastAPI):
             observer_worker=_system_observer_worker,
         )
         _file_watcher_worker.start()
-        logger.info("[23/24] File watcher worker started.")
+        logger.info("[23/28] File watcher worker started.")
 
         from services.avoidance_detector import AvoidanceDetector
         _avoidance_detector = AvoidanceDetector(
@@ -444,7 +445,7 @@ async def lifespan(app: FastAPI):
             id="avoidance_detection",
             replace_existing=True,
         )
-        logger.info("[24/26] Avoidance detector scheduled (30min).")
+        logger.info("[24/28] Avoidance detector scheduled (30min).")
 
         # Wire health worker now that voice + ws are ready
         _presence_health_worker.set_voice_service(_voice_service)
@@ -454,7 +455,7 @@ async def lifespan(app: FastAPI):
             asyncio.get_event_loop(),
         )
         _github_worker.start()
-        logger.info("[25/26] GitHub worker started with health monitor.")
+        logger.info("[25/28] GitHub worker started with health monitor.")
 
         from api.routes import observer as observer_routes
         from api.routes.observer import router as observer_router
@@ -464,7 +465,7 @@ async def lifespan(app: FastAPI):
             _avoidance_detector,
         )
         app.include_router(observer_router)
-        logger.info("[26/27] Observer routes ready.")
+        logger.info("[26/28] Observer routes ready.")
 
         from services.relationship_tracker import RelationshipTracker
         _relationship_tracker = RelationshipTracker(
@@ -479,7 +480,11 @@ async def lifespan(app: FastAPI):
             id="cold_contact_detection",
             replace_existing=True,
         )
-        logger.info("[27/27] Relationship tracker ready (6h schedule).")
+        logger.info("[27/28] Relationship tracker ready (6h schedule).")
+
+        _dream_event_queue = asyncio.Queue()
+        _system_observer_worker.set_dream_queue(_dream_event_queue)
+        logger.info("[28/28] Dream Mode queue created and wired to observer worker.")
 
         logger.info("=" * 50)
         logger.info("MAIHERA is live. Boss, I am ready.")
@@ -528,7 +533,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MAIHERA",
     description="M.A.I.H.E.R.A — Mai He Raja, Mai He Rani",
-    version="0.5.0-phase5",
+    version="0.6.0-phase6",
     lifespan=lifespan
 )
 
