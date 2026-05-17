@@ -1071,6 +1071,163 @@ Updated at the end of every phase. Use this to carry context forward into the ne
 
 ---
 
+### Phase 4 — MAIHERA Executes
+
+**Status:** Complete
+
+**What was built:**
+
+**Pre-implementation architecture decisions:**
+- Discrete Orchestrator class (not service-layer pattern) — single
+  authority, auditable, all tools plug into one interface
+- ConfirmationBroker as separate component — owns full confirmation
+  lifecycle, chat handler checks it before LLM routing
+- Chat-primary confirmation UX with pending badge — conversational
+  feel preserved, voice-compatible, no dedicated modal needed
+- Cooldown enforcement at Orchestrator level (not tool level) —
+  tools remain stateless, Orchestrator queries SQLite task history
+- Context Capture triage layer — staged status, 7-day TTL,
+  Dream Mode promotes/merges/archives, never silent delete
+- Skill failure propagation explicit per step — four modes:
+  abort_skill | skip_step | retry | surface_to_yash
+
+**Block A — Orchestrator Core**
+- SQLite schema: orchestrator_tasks + confirmations tables added
+  to existing DatabaseManager. Full CRUD methods for both.
+- BaseTool interface: ToolResult, VerificationResult, AutonomyTier,
+  VerificationMethod — abstract base class all tools implement.
+- ConfirmationBroker: request(), resolve(), expire_stale().
+  CONFIRM_SIGNALS and CANCEL_SIGNALS sets. Disambiguation when
+  multiple confirmations pending. Callbacks for on_confirmed and
+  on_cancelled. APScheduler expiry every 2 minutes.
+- Orchestrator: submit(), get_status(), cancel(). Full state machine:
+  pending_confirmation → queued → running → completed/failed.
+  Retry with exponential backoff. Verification after every execution.
+  Cooldown enforcement via get_last_completed_task_by_tool().
+  _surface_to_yash() for all failure notifications — never silent.
+- ToolRegistry: 13 tools registered. Readers first (always_allow),
+  writers after (confirm_first / always_confirm).
+  CalendarReaderTool, CalendarWriterTool (with rollback),
+  GitHubReaderTool, GitHubWriterTool, GitHubRepoReaderTool,
+  GmailSenderTool, WebResearcherTool, DriveWriterTool,
+  FigmaReaderTool, CanvaCreatorTool, SystemObserverTool,
+  SignalUpdaterTool, VoiceOutputTool.
+- Tool cooldowns: github_repo_reader = 48h, web_researcher = 5min.
+- Orchestrator API routes: /orchestrator/submit, /status/{id},
+  /cancel/{id}, /confirmations, /tasks, /tools.
+- WS chat handler modified: confirmation routing check runs before
+  standup routing and before normal chat. confirmation_broker=
+  passed into _handle_ws_chat as parameter.
+- 3 new WebSocket message types: confirmation_requested,
+  confirmation_resolved, confirmation_expired.
+- OutboundMessage type extended: confirm, cancel_confirmation.
+- Lifespan expanded from 12 to 18 steps.
+- 8/8 Orchestrator unit tests passing.
+
+**Block B — Skills**
+- SkillDefinition, SkillStep, SkillStepResult, SkillResult
+  dataclasses. OnFailure enum with 4 modes.
+- SkillExecutor: executes skills by submitting each step to
+  Orchestrator. Dependency checking. Payload template resolution
+  via {step_N.field} syntax. Compensation (rollback) on abort_skill.
+  _wait_for_terminal() polls SQLite for task completion.
+- 3 seed skills:
+  create_github_issue_with_comment (step 1 abort, step 2 skip)
+  research_and_capture (step 1 abort, step 2 surface_to_yash)
+  calendar_event_with_drive_doc (step 1 abort, step 2 surface_to_yash)
+- Skills API routes: GET /skills/, GET /skills/{id},
+  POST /skills/execute.
+
+**Block C — Context Capture**
+- ContextCaptureService: capture(), promote(), merge(), archive(),
+  expire_stale(), get_staged_count(), get_triage_briefing_text().
+- staging_captures SQLite table: id, node_id, raw_text,
+  captured_at, expires_at, status, promoted_at, merged_into,
+  archived_reason, triage_source.
+- Captured nodes enter status='staging' not 'active'.
+- 7-day TTL — expire_stale() runs daily at 3AM via APScheduler.
+- Triage briefing text surfaced in morning briefing if count > 0.
+- Capture API routes: POST /capture/, GET /capture/staged,
+  POST /capture/triage, GET /capture/count.
+- BrainService: update_node_status() and update_node_description()
+  added as convenience wrappers over update_node().
+- CalendarService: get_upcoming_events(), get_event(), create_event(),
+  delete_event() added for tool wiring.
+- GitHubService: create_issue(), get_issue() added for tool wiring.
+
+**Block D — Gmail Reader**
+- gmail.readonly scope added to existing Google OAuth token.
+  Re-auth script: backend/auth/reauth_gmail_readonly.py.
+- GmailReaderService: poll_inbox(), _score_email(), _create_brain_node(),
+  _ensure_person_node(), process_instruction_email().
+- Sender-based importance rules: github.com, anthropic.com, groq.com,
+  cartesia.ai, elevenlabs.io, openai.com, openrouter.ai = high/medium.
+  yashpulsay@gmail.com = instruction tier (always processed as command).
+- GitHub email refinement: subject pattern matching for
+  high (security alert, review requested, failing) vs
+  medium (dependabot, bot, closed, merged).
+- Brain integration: high and medium emails → event nodes.
+  Non-bot senders → person nodes with source_ref deduplication.
+  Raw email body never stored in graph.
+- gmail_read_state SQLite table: message ID deduplication +
+  last poll timestamp. Same key-value pattern as github_state.
+- GmailReaderWorker: polls every 5 minutes via APScheduler.
+  High emails surface immediately via voice + WS nudge.
+  Instruction emails processed via LLM and response surfaced.
+- 15/15 Phase 4 integration tests passing.
+- 18/18 services startup clean.
+
+**Key decisions made during Phase 4:**
+- Frontend confirmation UI (pending badge + card) deferred to
+  UI pass — backend confirmation flow fully functional without it.
+- Relationship tracking deferred to Phase 5 — cleaner with
+  behavioral signals live from system observer.
+- GitHub stays on API worker — email reader handles API platform
+  communications only. Concerns separated cleanly.
+- MAIHERA reads her own inbox (maihera.ai@gmail.com) not Yash's
+  personal Gmail — privacy concern eliminated by architecture.
+- Emails from yashpulsay@gmail.com to MAIHERA treated as direct
+  instructions — natural mobile interface when away from Electron app.
+- GmailReaderWorker poll missed by 1.6s on first run (APScheduler
+  collision with nudge evaluation) — cosmetic, self-corrects.
+
+**New files created:**
+- backend/brain/sqlite_store.py (modified — 2 new tables, CRUD)
+- backend/orchestrator/base_tool.py
+- backend/orchestrator/confirmation_broker.py
+- backend/orchestrator/orchestrator.py
+- backend/orchestrator/tool_registry.py
+- backend/orchestrator/skill_registry.py
+- backend/api/routes/orchestrator.py
+- backend/api/routes/skills.py
+- backend/api/routes/capture.py
+- backend/services/context_capture_service.py
+- backend/services/gmail_reader_service.py
+- backend/services/calendar_service.py (modified — 5 new methods)
+- backend/services/github_service.py (modified — 2 new methods)
+- backend/brain/brain_service.py (modified — 2 new methods)
+- backend/workers/gmail_reader_worker.py
+- backend/auth/reauth_gmail_readonly.py
+- backend/tests/test_phase4_orchestrator.py
+- backend/tests/test_phase4_integration.py
+- frontend/maihera-app/src/types/ws_messages.ts (modified)
+
+**Known issues:**
+- Frontend confirmation UI not built — pending badge and
+  confirmation card deferred to UI pass.
+- WebResearcherTool.execute() returns empty results stub —
+  web search integration not wired. Phase 6 Dream Mode will
+  wire this fully.
+- DriveWriterTool, FigmaReaderTool, CanvaCreatorTool stubs —
+  MCP integrations deferred to Phase 4 UI pass or Phase 5.
+- SystemObserverTool stub — Phase 5 builds this fully.
+- Whisper ffmpeg PATH not confirmed — voice input may fail
+  silently. Deferred to Phase 5.
+
+**Next phase:** Phase 5 — MAIHERA Watches
+
+---
+
 
 
 ---
