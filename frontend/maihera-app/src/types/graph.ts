@@ -102,8 +102,8 @@ export interface ForceNode extends GraphNode {
   y?: number
   vx?: number
   vy?: number
-  fx?: number | null
-  fy?: number | null
+  fx?: number
+  fy?: number
 }
 
 export interface ForceLink {

@@ -158,6 +158,17 @@ class WebSocketService {
         session.setStatus(p.status)
         break
       }
+      case 'highlight_node': {
+        const p = payload as { node_ids: string[], duration_ms: number, reason: string }
+        if (p.node_ids && p.node_ids.length > 0) {
+          ui.setHighlightedNodes(p.node_ids)
+          // Auto-clear after duration
+          setTimeout(() => {
+            ui.clearHighlights()
+          }, p.duration_ms ?? 3000)
+        }
+        break
+      }
 
       default:
         console.debug('[WS] Unknown message type:', type)
