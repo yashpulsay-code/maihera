@@ -3,6 +3,9 @@ MAIHERA System Observer Worker
 Async consumer that drains ContextEvents from the observer queue.
 Writes behavioral signals to the brain graph.
 Runs in the FastAPI event loop — no threading needed here.
+
+Phase 6: routes idle_start / idle_end events to a dedicated
+Dream Mode queue for clean trigger handling.
 """
 
 import asyncio
@@ -32,17 +35,15 @@ class SystemObserverWorker:
     Consumes ContextEvents from the system observer queue.
     Translates behavioral signals into brain graph updates.
 
-    Three event types handled:
-    - focus_gained: Yash switched to a whitelisted app
-    - dwell: Yash has been in the same app for 2+ minutes
-    - focus_lost: Yash left a whitelisted app
+    Five event types handled:
+    - focus_gained : Yash switched to a whitelisted app
+    - dwell        : Yash has been in the same app for 2+ minutes
+    - focus_lost   : Yash left a whitelisted app
+    - idle_start   : routed to Dream Mode queue — no brain write
+    - idle_end     : routed to Dream Mode queue — no brain write
 
-    Signal writes:
-    - dwell in coding/design context → spike attention on
-      matching project nodes
-    - focus_lost after long dwell → update last_active on
-      self node
-    - All events → update current_context on self node
+    Dream Mode queue is optional — if not set, idle events are
+    logged and dropped cleanly with no error.
     """
 
     def __init__(self, event_queue: asyncio.Queue, brain_service):
@@ -51,12 +52,27 @@ class SystemObserverWorker:
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
+        # Dream Mode trigger channel — injected after init
+        self._dream_queue: Optional[asyncio.Queue] = None
+
         # Track session-level context
         self._current_context: Optional[str] = None
         self._current_label: Optional[str] = None
         self._session_start: Optional[str] = None
 
         logger.info("SystemObserverWorker initialized.")
+
+    # ── Dependency Injection ──────────────────────────────────────
+
+    def set_dream_queue(self, queue: asyncio.Queue) -> None:
+        """
+        Inject the Dream Mode trigger queue.
+        Must be called before idle events are expected.
+        Called from main.py lifespan after both worker and
+        Dream Mode service are initialized.
+        """
+        self._dream_queue = queue
+        logger.info("SystemObserverWorker: dream queue wired.")
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -83,7 +99,6 @@ class SystemObserverWorker:
         logger.info("SystemObserverWorker: consumer loop running.")
         while self._running:
             try:
-                # Wait up to 5s for an event then loop
                 event = await asyncio.wait_for(
                     self._queue.get(), timeout=5.0
                 )
@@ -93,9 +108,7 @@ class SystemObserverWorker:
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
-                logger.info(
-                    "SystemObserverWorker: consumer cancelled."
-                )
+                logger.info("SystemObserverWorker: consumer cancelled.")
                 break
             except Exception as e:
                 logger.error(
@@ -117,6 +130,31 @@ class SystemObserverWorker:
             await self._on_dwell(event)
         elif event.event_type == "focus_lost":
             await self._on_focus_lost(event)
+        elif event.event_type in ("idle_start", "idle_end"):
+            await self._on_idle_event(event)
+        else:
+            logger.debug(
+                "ObserverWorker: unknown event type %s — ignored.",
+                event.event_type
+            )
+
+    async def _on_idle_event(self, event) -> None:
+        """
+        Route idle_start / idle_end directly to the Dream Mode queue.
+        No brain graph writes — these are control signals only.
+        """
+        if self._dream_queue is not None:
+            await self._dream_queue.put(event)
+            logger.info(
+                "ObserverWorker: %s routed to dream queue (%.0fs idle).",
+                event.event_type, event.dwell_seconds
+            )
+        else:
+            logger.warning(
+                "ObserverWorker: %s received but dream queue not wired. "
+                "Dream Mode will not trigger.",
+                event.event_type
+            )
 
     async def _on_focus_gained(self, event) -> None:
         """
@@ -128,10 +166,8 @@ class SystemObserverWorker:
         self._current_label   = event.process_label
         self._session_start   = event.timestamp
 
-        # Update self node with current context
         self._update_self_context(event.context, event.process_label)
 
-        # Light attention boost on projects matching this context
         if event.context in ("coding", "design"):
             await self._boost_project_attention(
                 context=event.context,
@@ -143,7 +179,6 @@ class SystemObserverWorker:
         """
         Yash has been in the same app for 2+ minutes.
         Stronger attention spike on matching project nodes.
-        This is the primary 'active work' signal.
         """
         if event.dwell_seconds < DWELL_MIN_SECONDS:
             return
@@ -166,7 +201,6 @@ class SystemObserverWorker:
         """
         Yash left a whitelisted app.
         Update self node last_active timestamp.
-        Record session duration for pattern learning.
         """
         self._update_self_last_active(
             context=event.context,
@@ -184,9 +218,7 @@ class SystemObserverWorker:
 
     # ── Brain Writes ──────────────────────────────────────────────
 
-    def _update_self_context(
-        self, context: str, label: str
-    ) -> None:
+    def _update_self_context(self, context: str, label: str) -> None:
         """Write current activity context to the self node."""
         try:
             with self._brain.driver.session() as session:
@@ -208,7 +240,7 @@ class SystemObserverWorker:
     def _update_self_last_active(
         self, context: str, dwell_seconds: float
     ) -> None:
-        """Update last_active and session log on self node."""
+        """Update last_active on self node."""
         try:
             with self._brain.driver.session() as session:
                 session.run("""
@@ -222,8 +254,7 @@ class SystemObserverWorker:
                 )
         except Exception as e:
             logger.error(
-                "ObserverWorker: failed to update self last_active: %s",
-                e
+                "ObserverWorker: failed to update self last_active: %s", e
             )
 
     async def _boost_project_attention(
@@ -233,15 +264,13 @@ class SystemObserverWorker:
         source_label: str
     ) -> None:
         """
-        Boost attention on active project nodes that match
+        Boost attention on active project nodes matching
         the current work context.
 
         Context mapping:
-        - coding  → MAIHERA project (active build)
-        - design  → Presence project (UI/design work)
-        - both    → both projects get a lighter boost
-
-        Attention is clamped to 1.0. Never decays below floor.
+        - coding  → MAIHERA project
+        - design  → Presence project
+        - browsing → both projects, lighter boost
         """
         try:
             projects = self._brain.list_nodes(
@@ -254,21 +283,18 @@ class SystemObserverWorker:
                 if not project_id:
                     continue
 
-                # Determine if this project matches the context
                 is_match = False
                 if context == "coding" and "maihera" in label_lower:
                     is_match = True
                 elif context == "design" and "presence" in label_lower:
                     is_match = True
                 elif context == "browsing":
-                    # Browsing gets a light boost on both — research signal
                     boost = min(boost, 0.15)
                     is_match = True
 
                 if not is_match:
                     continue
 
-                # Read current attention — live from Neo4j
                 node = self._brain.get_node(project_id)
                 if not node:
                     continue
@@ -280,8 +306,10 @@ class SystemObserverWorker:
                     project_id, "attention", new_val
                 )
                 logger.debug(
-                    "ObserverWorker: attention %s → %.3f (via %s, +%.2f)",
-                    project.get("label"), new_val, source_label, boost
+                    "ObserverWorker: attention %s → %.3f "
+                    "(via %s, +%.2f)",
+                    project.get("label"), new_val,
+                    source_label, boost
                 )
 
         except Exception as e:
