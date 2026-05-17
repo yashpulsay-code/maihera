@@ -231,6 +231,13 @@ async def lifespan(app: FastAPI):
     global _voice_service, _nudge_service
     global _calendar_service, _calendar_worker
     global _github_service, _github_worker
+    global _gmail_reader_service, _gmail_reader_worker
+    global _system_observer, _system_observer_worker
+    global _observer_event_queue, _dream_event_queue
+    global _file_watcher, _file_watcher_worker, _file_watcher_queue
+    global _avoidance_detector, _presence_health_worker
+    global _relationship_tracker
+    global _dream_mode_service, _dream_mode_worker
 
     logger.info("=" * 50)
     logger.info("MAIHERA starting up...")
