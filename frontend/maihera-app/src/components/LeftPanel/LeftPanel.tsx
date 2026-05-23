@@ -4,7 +4,6 @@ import { useUIStore } from '../../stores/uiStore'
 import { wsService } from '../../services/websocket'
 import type { GraphNode } from '../../types/graph'
 
-// Placeholder schedule — replaced by real Calendar data in Phase 3
 interface ScheduleEvent {
   time: string
   title: string
@@ -34,19 +33,155 @@ function resistanceColor(resistance: number): string {
   return '#1a5a3a'
 }
 
+// ── Standalone fetch action — no recursion risk ───────────────────────
+
+async function submitProposalAction(
+  nodeId: string,
+  action: 'approve' | 'dismiss'
+): Promise<void> {
+  try {
+    await fetch(`http://localhost:8000/brain/nodes/${nodeId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: action === 'approve' ? 'active' : 'archived'
+      })
+    })
+  } catch (err) {
+    console.error('[Proposals] Action failed:', err)
+  }
+}
+
+// ── Proposal Card ─────────────────────────────────────────────────────
+
+function ProposalCard({ node, onAction }: {
+  node: GraphNode
+  onAction: (id: string, action: 'approve' | 'dismiss') => void
+}) {
+  const isChallenge = node.description?.includes('[SELF_IMPROVEMENT]') ||
+                      node.description?.includes('[DESIGN_CHALLENGE]')
+
+  const labelColor = isChallenge ? '#cc8800' : '#4a9ecc'
+
+  return (
+    <div style={{
+      background: 'rgba(10,18,30,0.7)',
+      border: `0.5px solid ${isChallenge ? '#331a00' : '#0e2235'}`,
+      borderRadius: '6px',
+      padding: '8px 10px',
+      marginBottom: '7px',
+    }}>
+      <div style={{
+        fontSize: '7px',
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase',
+        color: labelColor,
+        marginBottom: '4px',
+      }}>
+        {isChallenge ? 'proposal' : 'insight'}
+      </div>
+
+      <div style={{
+        fontSize: '9px',
+        color: '#4a8ab0',
+        lineHeight: 1.4,
+        marginBottom: '4px',
+      }}>
+        {node.label}
+      </div>
+
+      {node.description && (
+        <div style={{
+          fontSize: '8px',
+          color: '#1e3a5a',
+          lineHeight: 1.4,
+          marginBottom: '7px',
+          display: '-webkit-box',
+          WebkitLineClamp: 3,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+        } as React.CSSProperties}>
+          {node.description.replace(/\[.*?\]\s*/g, '')}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: '6px' }}>
+        <button
+          onClick={() => onAction(node.id, 'approve')}
+          style={{
+            flex: 1,
+            height: '20px',
+            border: '0.5px solid #1a4a2a',
+            borderRadius: '4px',
+            background: 'rgba(10,40,20,0.6)',
+            color: '#1a9e6a',
+            fontSize: '8px',
+            cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}
+        >
+          Approve
+        </button>
+        <button
+          onClick={() => onAction(node.id, 'dismiss')}
+          style={{
+            flex: 1,
+            height: '20px',
+            border: '0.5px solid #2a1a0e',
+            borderRadius: '4px',
+            background: 'rgba(30,10,5,0.5)',
+            color: '#6a3a2a',
+            fontSize: '8px',
+            cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Main Component ────────────────────────────────────────────────────
+
 export function LeftPanel() {
-  const { nodes } = useGraphStore()
+  const { nodes, upsertNode } = useGraphStore()
   const { energyLevel, maiheraStatus } = useSessionStore()
   const { leftPanelCollapsed, toggleLeftPanel } = useUIStore()
 
-  // High signal nodes — urgency or resistance threshold
   const highSignalNodes: GraphNode[] = Array.from(nodes.values())
     .filter(n =>
       n.status === 'active' &&
+      n.type !== 'project' &&
       (n.importance >= 0.5 || n.resistance >= 0.4)
     )
     .sort((a, b) => (b.importance + b.attention) - (a.importance + a.attention))
     .slice(0, 4)
+
+  const dreamProposals: GraphNode[] = Array.from(nodes.values())
+    .filter(n =>
+      n.source === 'dream' &&
+      n.status === 'active' &&
+      (n.type === 'idea' || n.type === 'insight')
+    )
+    .sort((a, b) => b.importance - a.importance)
+    .slice(0, 5)
+
+  // Renamed to onProposalAction — calls submitProposalAction, no recursion
+  const onProposalAction = async (
+    nodeId: string,
+    action: 'approve' | 'dismiss'
+  ) => {
+    const existing = nodes.get(nodeId)
+    if (existing) {
+      upsertNode({
+        ...existing,
+        status: action === 'approve' ? 'active' : 'archived'
+      })
+    }
+    await submitProposalAction(nodeId, action)
+  }
 
   return (
     <div style={{
@@ -91,7 +226,7 @@ export function LeftPanel() {
       <div style={{
         opacity: leftPanelCollapsed ? 0 : 1,
         transition: 'opacity 0.15s ease',
-        overflow: 'hidden',
+        overflow: 'hidden auto',
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
@@ -174,16 +309,48 @@ export function LeftPanel() {
           )}
         </div>
 
-        {/* Section: Dream */}
+        {/* Section: Dream Mode Proposals */}
         <div style={{ padding: '0 14px 10px' }}>
-          <div style={{ fontSize: '8px', letterSpacing: '0.12em', color: '#1e3a5a', textTransform: 'uppercase', marginBottom: '8px' }}>
-            Dream last night
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: '8px',
+          }}>
+            <div style={{ fontSize: '8px', letterSpacing: '0.12em', color: '#1e3a5a', textTransform: 'uppercase' }}>
+              Dream proposals
+            </div>
+            {dreamProposals.length > 0 && (
+              <div style={{
+                fontSize: '7px',
+                color: '#2a5070',
+                background: 'rgba(20,40,60,0.6)',
+                border: '0.5px solid #0e2235',
+                borderRadius: '8px',
+                padding: '1px 6px',
+              }}>
+                {dreamProposals.length}
+              </div>
+            )}
           </div>
-          <div style={{ fontSize: '9px', color: '#2a5070', lineHeight: 1.5 }}>
-            {maiheraStatus === 'dream'
-              ? 'Dream Mode active — working...'
-              : 'Dream Mode activates in Phase 6.'}
-          </div>
+
+          {maiheraStatus === 'dream' ? (
+            <div style={{ fontSize: '9px', color: '#2a5070', lineHeight: 1.5 }}>
+              Dream Mode active — working...
+            </div>
+          ) : dreamProposals.length === 0 ? (
+            <div style={{ fontSize: '9px', color: '#1e3a5a', lineHeight: 1.5 }}>
+              No proposals yet. Dream Mode activates after 10 minutes idle.
+            </div>
+          ) : (
+            dreamProposals.map(node => (
+              <ProposalCard
+                key={node.id}
+                node={node}
+                onAction={onProposalAction}
+              />
+            ))
+          )}
         </div>
 
       </div>
